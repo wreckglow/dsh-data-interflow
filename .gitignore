@@ -1,0 +1,18 @@
+# Dependencies and local state
+node_modules/
+pnpm-debug.log*
+*.log
+
+# Interflow runtime state (lives here only if you point dataDir at the repo)
+state.json
+events.jsonl
+data/
+
+# Secrets and OS noise
+.env
+.env.*
+.DS_Store
+Thumbs.db
+*.tmp
+*.tgz
+coverage/

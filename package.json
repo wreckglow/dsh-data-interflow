@@ -1,0 +1,57 @@
+{
+  "name": "@local/dsh-interflow",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "DSH Interflow — messaging, mailbox and remote execution between DSH instances.",
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "dsh",
+    "mqtt",
+    "interop",
+    "multi-agent",
+    "messaging"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wreckglow/dsh-data-interflow.git"
+  },
+  "homepage": "https://github.com/wreckglow/dsh-data-interflow#readme",
+  "bugs": {
+    "url": "https://github.com/wreckglow/dsh-data-interflow/issues"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "mqtt-transport.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "assets/*.svg",
+    "docs/*.md",
+    "README.md"
+  ],
+  "dependencies": {
+    "mqtt": "^5.16.1"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  }
+}

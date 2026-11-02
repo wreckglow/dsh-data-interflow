@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" role="img" aria-labelledby="ifx-seq-title ifx-seq-desc">
+  <title id="ifx-seq-title">Remote request and reply</title>
+  <desc id="ifx-seq-desc">A phone sends a request to a mailbox, the watch picks it up, runs a local agent session with tools, and answers back through the mailbox.</desc>
+  <defs>
+    <linearGradient id="ifx-seq-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#070b14"/>
+      <stop offset="1" stop-color="#0a1120"/>
+    </linearGradient>
+    <pattern id="ifx-seq-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#17233c" stroke-width="1"/>
+    </pattern>
+    <marker id="ifx-seq-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#5b8cff"/>
+    </marker>
+    <marker id="ifx-seq-purple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#9b6bff"/>
+    </marker>
+    <marker id="ifx-seq-teal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#2fd8c0"/>
+    </marker>
+    <marker id="ifx-seq-gray" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#8a9bbd"/>
+    </marker>
+  </defs>
+
+  <rect width="1280" height="640" fill="url(#ifx-seq-bg)"/>
+  <rect width="1280" height="640" fill="url(#ifx-seq-grid)" opacity="0.38"/>
+
+  <text x="48" y="50" fill="#eef3ff" font-family="ui-sans-serif, 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif" font-size="26" font-weight="700" letter-spacing="1">REMOTE REQUEST, ASYNCHRONOUSLY</text>
+  <text x="48" y="76" fill="#8594b8" font-family="ui-sans-serif, 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif" font-size="13">DSH A asks DSH B for something; DSH B runs a real session and answers through the mailbox.</text>
+
+  <g font-family="ui-sans-serif, 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif">
+    <!-- lifelines -->
+    <line x1="180" y1="150" x2="180" y2="560" stroke="#253552" stroke-width="1.2" stroke-dasharray="4 7"/>
+    <line x1="500" y1="150" x2="500" y2="560" stroke="#253552" stroke-width="1.2" stroke-dasharray="4 7"/>
+    <line x1="820" y1="150" x2="820" y2="560" stroke="#253552" stroke-width="1.2" stroke-dasharray="4 7"/>
+    <line x1="1100" y1="150" x2="1100" y2="560" stroke="#253552" stroke-width="1.2" stroke-dasharray="4 7"/>
+
+    <!-- headers -->
+    <rect x="100" y="100" width="160" height="46" rx="11" fill="#0f1a30" stroke="#3b5b8f"/>
+    <text x="180" y="128" fill="#dbe6ff" text-anchor="middle" font-size="13" font-weight="600">DSH A</text>
+    <rect x="420" y="100" width="160" height="46" rx="11" fill="#121d38" stroke="#5b4b8f"/>
+    <text x="500" y="128" fill="#e6ddff" text-anchor="middle" font-size="13" font-weight="600">Mailbox</text>
+    <rect x="740" y="100" width="160" height="46" rx="11" fill="#0f1a30" stroke="#2f6f6a"/>
+    <text x="820" y="128" fill="#d9fff8" text-anchor="middle" font-size="13" font-weight="600">DSH B</text>
+    <rect x="1020" y="100" width="160" height="46" rx="11" fill="#0f1a30" stroke="#3a4a68"/>
+    <text x="1100" y="128" fill="#dbe6ff" text-anchor="middle" font-size="13" font-weight="600">Local tools</text>
+
+    <!-- 1 request -->
+    <line x1="180" y1="190" x2="496" y2="190" stroke="#5b8cff" stroke-width="1.8" marker-end="url(#ifx-seq-blue)"/>
+    <text x="338" y="178" fill="#9fb2dc" text-anchor="middle" font-size="11.5">1 · interflow_request · kind=request</text>
+    <text x="338" y="208" fill="#6f7f9f" text-anchor="middle" font-size="10">stored immediately, even if DSH B is offline</text>
+
+    <!-- 2 deliver -->
+    <line x1="500" y1="250" x2="816" y2="250" stroke="#9b6bff" stroke-width="1.8" stroke-dasharray="6 5" marker-end="url(#ifx-seq-purple)"/>
+    <text x="658" y="238" fill="#b8a8e8" text-anchor="middle" font-size="11.5">2 · deliver when DSH B comes online</text>
+
+    <!-- 3 session -->
+    <rect x="700" y="288" width="240" height="44" rx="10" fill="#0d1a24" stroke="#2f6f6a"/>
+    <text x="820" y="310" fill="#bdf4ea" text-anchor="middle" font-size="11.5">3 · create session + inject prompt</text>
+    <text x="820" y="325" fill="#6f8f8b" text-anchor="middle" font-size="9.5">sessionController.create / prompt / follow</text>
+
+    <!-- 4 tools -->
+    <line x1="820" y1="370" x2="1096" y2="370" stroke="#2fd8c0" stroke-width="1.8" marker-end="url(#ifx-seq-teal)"/>
+    <text x="958" y="358" fill="#a8e6da" text-anchor="middle" font-size="11.5">4 · local tools: location, shell, files</text>
+    <line x1="1100" y1="402" x2="824" y2="402" stroke="#8a9bbd" stroke-width="1.6" stroke-dasharray="5 5" marker-end="url(#ifx-seq-gray)"/>
+    <text x="962" y="392" fill="#9aa9c7" text-anchor="middle" font-size="10.5">results back into the session</text>
+
+    <!-- 5 answer -->
+    <line x1="820" y1="462" x2="504" y2="462" stroke="#2fd8c0" stroke-width="1.8" marker-end="url(#ifx-seq-teal)"/>
+    <text x="662" y="450" fill="#a8e6da" text-anchor="middle" font-size="11.5">5 · answer · replyTo = request id</text>
+
+    <!-- 6 deliver -->
+    <line x1="500" y1="518" x2="184" y2="518" stroke="#9b6bff" stroke-width="1.8" stroke-dasharray="6 5" marker-end="url(#ifx-seq-purple)"/>
+    <text x="342" y="506" fill="#b8a8e8" text-anchor="middle" font-size="11.5">6 · deliver when DSH A comes online</text>
+
+    <!-- footer -->
+    <rect x="48" y="584" width="1184" height="1" fill="#1d2a45"/>
+    <text x="48" y="608" fill="#7f8fb3" font-size="11">No pair of instances needs to be online at the same time. The request and the answer are both durable messages.</text>
+    <text x="48" y="628" fill="#5f6f92" font-size="10">Timeouts, busy, disabled execution, and failures are answered explicitly instead of leaving the caller waiting forever.</text>
+  </g>
+</svg>

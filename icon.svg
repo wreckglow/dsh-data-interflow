@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Interflow">
+  <defs>
+    <linearGradient id="ifx-g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3d7bff"/>
+      <stop offset="1" stop-color="#7b5cff"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#ifx-g)"/>
+  <rect x="12" y="15" width="24" height="17" rx="6" fill="#ffffff" opacity="0.94"/>
+  <rect x="28" y="32" width="24" height="17" rx="6" fill="#ffffff" opacity="0.7"/>
+  <path d="M19 41h12M33 23h12" stroke="#ffffff" stroke-width="3" stroke-linecap="round" opacity="0.9"/>
+  <path d="M29 38l4 4-4 4M35 19l4 4-4 4" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

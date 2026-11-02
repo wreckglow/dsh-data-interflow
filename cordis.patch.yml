@@ -1,0 +1,67 @@
+# Interflow — messaging between DSH instances.
+#
+# Three roles:
+#   peer   Symmetric peers on one LAN or machine (default; this row starts isolated).
+#   hub    A mailbox: listens, accepts pushes, serves each device its own inbox.
+#   spoke  Outbound-only device (phone/watch): no listener, pushes and pulls the mailbox.
+#
+# Server (hub) example:
+#   role: hub
+#   nodeName: server
+#   listenHost: 0.0.0.0          # or a Tailscale/ZeroTier address
+#   token: change-me-shared-secret
+#
+# Phone / watch (spoke) example:
+#   role: spoke
+#   nodeName: phone
+#   hubUrl: http://100.64.0.5:47810
+#   token: change-me-shared-secret
+#   pollMs: 15000
+#
+# MQTT relay example (no public IP, all devices outbound):
+#   transport: mqtt
+#   nodeName: phone
+#   mqttUrl: wss://broker.emqx.io:8084/mqtt
+#   mqttTopic: interflow-random-room-name
+#   token: change-me-shared-secret
+#   executeRequests: true
+#
+# Keys:
+#   role         peer | hub | spoke. A config with only hubUrl implies spoke.
+#   transport    http (default) or mqtt. MQTT ignores role/hubUrl/peers.
+#   mqttUrl      Broker URL for the MQTT transport.
+#   mqttTopic    Shared room name; use a long random string on public brokers.
+#   mqttUsername / mqttPassword  Optional broker credentials.
+#   mqttSecret   Optional separate E2E key; empty uses `token`.
+#   hubUrl       Mailbox origin for a spoke.
+#   hubToken     Separate mailbox token; empty falls back to `token`.
+#   listen       false disables the inbound port. A spoke defaults to false.
+#   listenHost   Bind address. Keep 127.0.0.1 unless remote devices must reach
+#                this one; a non-loopback bind requires `token`.
+#   listenPort   First port to try. If busy, the next 20 ports are tried.
+#   token        Shared secret required from remote peers/devices.
+#   presenceWindowMs  How long a hub considers a member online (default 15000).
+#   executeRequests    Run incoming remote requests as agent sessions (default false).
+#   allowedRequesters  Node ids/names allowed to send requests; empty = any paired device.
+#   remoteCwd          Working directory for request sessions; empty = DSH default.
+#   requestTimeoutMs   Per-request execution timeout (default 120000).
+#   maxRemoteRequests  Concurrent request sessions (1-4, default 1).
+#   relay        Peer mode only: store and forward messages not addressed here.
+#   pollMs       Sync interval in milliseconds (minimum 500).
+#   maxEvents    Messages kept on disk (50-5000). Older ones are dropped.
+#   dataDir      State directory (default: <DSH_HOME>/integrations/interflow/<profile>).
+- insert:
+    - id: dsh-interflow
+      name: '@local/dsh-interflow'
+      config:
+        listenHost: 127.0.0.1
+        listenPort: 47810
+        pollMs: 2000
+        relay: true
+        # role: peer
+        # nodeName: my-laptop
+        # token: change-me-shared-secret
+        # peers:
+        #   - label: office
+        #     url: http://192.168.1.23:47810
+        #     token: change-me-shared-secret
