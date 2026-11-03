@@ -223,6 +223,39 @@ interflow_tasks
 
 ---
 
+## EMQX 文件库测试（B 方案）
+
+如果你的 broker 是 EMQX，并启用了 **Management → File Transfer**，可以用 `verify-emqx-file.mjs` 先验证“上传到 EMQX，再通过 API 下载”这条路。
+
+1. EMQX Dashboard → Management → File Transfer → Enable。
+2. 选 Local Storage 或 S3 Storage。
+3. System → API Keys 创建一个 **global** API key（namespaced key 不能下载文件）。
+4. 设置环境变量（不要写进仓库）：
+
+```powershell
+$env:EMQX_MQTT_URL='mqtt://mysvip.fun:1883'
+$env:EMQX_USERNAME='...'
+$env:EMQX_PASSWORD='...'
+$env:EMQX_API_URL='http://mysvip.fun:18083'
+$env:EMQX_API_KEY='...'
+$env:EMQX_API_SECRET='...'
+node verify-emqx-file.mjs
+```
+
+脚本会：
+
+- 用 MQTT 5 向 `$file/<id>/init`、`$file/<id>/<offset>`、`$file/<id>/fin/...` 上传；
+- 调 `GET /api/v5/file_transfer/files` 找到文件；
+- 下载 `uri`，校验 SHA-256。
+
+预期最后输出：
+
+```text
+EMQX file transfer test OK
+```
+
+注意：EMQX File Transfer 是**上传到 broker 的文件库**，不是 A 直接发给 B。接收方要靠 EMQX REST API（Local）或 S3 预签名 URL（S3）下载；这一步跑通后，再把上传/下载接到插件工具里。
+
 ## 配置
 
 配置写在实例 profile 的 `cordis.patch.yml` 里（插件管理器安装时写入的那一行）。面板可以修改传输方式；其余键通过 YAML 覆盖。
