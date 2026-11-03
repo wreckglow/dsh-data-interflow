@@ -1850,6 +1850,7 @@ function createEngine(ctx, rawConfig) {
    */
   async function configureTransport(input) {
     const mode = input && input.transport === 'mqtt' ? 'mqtt' : 'http';
+    const previousOverride = transportOverride && transportOverride.transport === 'mqtt' ? transportOverride : null;
     if (mode === 'http') {
       transportOverride = { transport: 'http' };
     } else {
@@ -1868,8 +1869,10 @@ function createEngine(ctx, rawConfig) {
         mqttUrl: url,
         mqttTopic: topic,
         mqttSecret: secret,
-        mqttUsername: clampText(input && input.mqttUsername, 200),
-        mqttPassword: typeof (input && input.mqttPassword) === 'string' ? input.mqttPassword : '',
+        mqttUsername: clampText(input && input.mqttUsername, 200) || (previousOverride && previousOverride.mqttUsername) || config.mqttUsername,
+        mqttPassword: typeof (input && input.mqttPassword) === 'string' && input.mqttPassword !== ''
+          ? input.mqttPassword
+          : ((previousOverride && previousOverride.mqttPassword) || config.mqttPassword),
       };
     }
     schedulePersist();

@@ -31,11 +31,13 @@
     "index.js",
     "client.js",
     "mqtt-transport.js",
+    "mqtt-bundle.cjs",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
     "assets/*.svg",
     "docs/*.md",
+    "THIRD_PARTY_NOTICES.md",
     "README.md"
   ],
   "dependencies": {

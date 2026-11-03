@@ -61,14 +61,14 @@ plugin_manager install_bundle  target: github:wreckglow/dsh-data-interflow
 
 发布与安装的完整步骤见 [docs/publishing.md](docs/publishing.md)。
 
-MQTT 模式还需要在插件目录装一次依赖：
+MQTT 客户端已经打包为 `mqtt-bundle.cjs`，通过相对路径加载，**不需要目标机额外安装 `mqtt`**，也不经过 DSH 的裸包名解析器。只有安装目录里缺少这个 bundle 的旧版本，才需要回退安装依赖：
 
 ```bash
 cd <插件目录>
 pnpm install --prod --ignore-scripts
 ```
 
-HTTP 模式不需要 `mqtt` 依赖。
+HTTP 模式完全不使用 `mqtt`。
 
 ### 2. 打开面板
 
@@ -139,6 +139,8 @@ hub 需要能被 spoke 连到。没有公网 IP 时用 Tailscale/ZeroTier，或�
 ### MQTT：跨网络、无公网 IP
 
 所有实例只做出站连接，连同一个 broker。broker 只看到主题和密文；消息用共享密钥派生的 AES-256-GCM 加密。实例通过 presence 主题自动发现彼此。
+
+MQTT 客户端（`mqtt` 及其依赖）已打包为 `mqtt-bundle.cjs`，插件用 `import('./mqtt-bundle.cjs')` 加载。这样即使 DSH 的模块解析器不解析第三方裸包名（部分 Android/libnode 构建），MQTT 仍然可用；bundle 缺失时才回退到 npm 包。
 
 ```yaml
 transport: mqtt
@@ -278,8 +280,14 @@ maxRemoteRequests: 1
 **面板没有变化？**
 客户端 bundle 需要刷新。刷新页面，或切走再切回「互通」。MQTT 配置卡片在「节点」页。
 
-**MQTT 连接报缺少 `mqtt`？**
-本地目录安装是 `link:`，profile 不会自动装依赖。进入插件目录执行 `pnpm install --prod --ignore-scripts`。
+**MQTT 连接报缺少 `mqtt` 或 bundle 加载失败？**
+当前包内置 `mqtt-bundle.cjs`，正常情况下不需要额外安装。先确认安装目录里这个文件存在；旧版本可以执行 `pnpm install --prod --ignore-scripts` 回退到 npm 包。两者都失败时，把完整 `error.stack` 发出来，不要继续改 `node_modules`。
+
+**启用 MQTT 报 “A shared secret is required”？**
+面板里的「共享密钥」是 Interflow 的端到端加密密钥，**不是 broker 密码**；当前 profile 如果也没有 `token`，就必须填一个。三台设备填同一个强随机值。Broker 的用户名/密码是另一组可选字段。
+
+**Broker 地址该写 `mqtt://` 还是 `ws://`？**
+纯 TCP MQTT 用 `mqtt://host:1883`（不要带 `/mqtt` 路径）；WebSocket 用 `ws://host:8083/mqtt` 或 `wss://host:8084/mqtt`；TLS TCP 用 `mqtts://host:8883`。`/mqtt` 是 WebSocket listener 的路径，不是 TCP 的。
 
 **公开 broker 可靠吗？**
 只适合试用和小流量。它不保证离线队列、retained 消息和限流。稳定使用请自建 Mosquitto/EMQX。
@@ -335,6 +343,7 @@ node verify-mqtt-engine.mjs  # 两个真实引擎经公共 broker 互发 + 远�
 ```text
 index.js              Host 半：角色、传输、同步、持久化、工具、面板路由
 mqtt-transport.js     MQTT 适配器：加密、主题、presence
+mqtt-bundle.cjs       内嵌 mqtt 及其依赖，相对路径加载
 client.js             浏览器半：侧栏入口、面板、消息流、MQTT 配置
 cordis.patch.yml      插件行与配置注释
 locale/{zh,en}.json   插件管理器显示用的标题与描述
@@ -351,6 +360,15 @@ node verify-host.mjs
 node verify-mailbox.mjs
 node verify-mqtt.mjs
 node verify-client.mjs
+```
+
+重新生成 MQTT bundle（升级 `mqtt` 后）：
+
+```bash
+pnpm dlx esbuild@0.25.0 node_modules/mqtt/build/index.js \
+  --bundle --platform=node --format=cjs --target=node20 \
+  --outfile=mqtt-bundle.cjs --conditions=node \
+  --external:bufferutil --external:utf-8-validate
 ```
 
 面板协议：Host 在 `/api/interflow` 上处理 `snapshot` / `send` / `addPeer` / `removePeer` / `markRead` / `sync` / `configureTransport`，浏览器用同源 Cookie 访问。节点间 HTTP 协议：`GET /health`、`GET /log`、`GET /inbox`、`POST /ingest`。

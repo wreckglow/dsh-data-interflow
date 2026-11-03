@@ -111,6 +111,7 @@ window.__ModuleLoader__.load({
       'mqtt.secret': '共享密钥',
       'mqtt.secretKeep': '留空沿用已保存的密钥',
       'mqtt.secretPlaceholder': '强随机共享密钥',
+      'mqtt.secretRequired': '必填：三台设备必须使用同一个共享密钥；它用于消息端到端加密，不是 broker 密码。',
       'mqtt.secretSet': '已保存密钥；留空则沿用',
       'mqtt.username': 'Broker 用户名（可选）',
       'mqtt.password': 'Broker 密码（可选）',
@@ -252,6 +253,7 @@ window.__ModuleLoader__.load({
       'mqtt.secret': 'Shared secret',
       'mqtt.secretKeep': 'Leave blank to keep the saved secret',
       'mqtt.secretPlaceholder': 'Strong shared secret',
+      'mqtt.secretRequired': 'Required: every device must use the same shared secret. It encrypts messages end to end; it is not the broker password.',
       'mqtt.secretSet': 'Secret saved; leave blank to keep it',
       'mqtt.username': 'Broker username (optional)',
       'mqtt.password': 'Broker password (optional)',
@@ -1434,9 +1436,11 @@ window.__ModuleLoader__.load({
       const [password, setPassword] = React.useState('');
       const [saving, setSaving] = React.useState(false);
       const working = saving || busy === 'transport';
+      const needsSecret = !settings.mqttSecretConfigured;
 
       const save = async () => {
         if (working || !url.trim() || !room.trim()) return;
+        if (needsSecret && !secret.trim()) return;
         setSaving(true);
         try {
           await onConfigure({
@@ -1507,7 +1511,7 @@ window.__ModuleLoader__.load({
               className: 'ifx-input',
               value: secret,
               type: 'password',
-              placeholder: settings.mqttSecretConfigured ? t('mqtt.secretKeep') : t('mqtt.secretPlaceholder'),
+              placeholder: needsSecret ? t('mqtt.secretPlaceholder') : t('mqtt.secretKeep'),
               onChange: (event) => setSecret(event.target.value),
             }),
           ),
@@ -1520,6 +1524,9 @@ window.__ModuleLoader__.load({
             }),
           ),
         ),
+        needsSecret
+          ? h('div', { className: 'ifx-hint ifx-top-gap-sm' }, t('mqtt.secretRequired'))
+          : null,
         h('label', { className: 'ifx-field ifx-block' },
           h('span', { className: 'ifx-label' }, t('mqtt.password')),
           h('input', {
@@ -1536,7 +1543,7 @@ window.__ModuleLoader__.load({
             : h('span', { className: 'ifx-hint' }, settings.mqttSecretConfigured ? t('mqtt.secretSet') : ''),
           h('button', {
             className: 'ifx-btn primary',
-            disabled: working || !url.trim() || !room.trim(),
+            disabled: working || !url.trim() || !room.trim() || (needsSecret && !secret.trim()),
             onClick: save,
           }, working ? t('mqtt.saving') : active ? t('mqtt.save') : t('mqtt.enable')),
         ),

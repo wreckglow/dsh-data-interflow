@@ -77,15 +77,23 @@ function nowIso() {
 }
 
 /**
- * Load the optional `mqtt` package only when MQTT is actually used.
+ * Load the MQTT client. Prefer the bundled copy so a Host that cannot resolve
+ * third-party bare specifiers (some DSH builds) still gets MQTT; fall back to
+ * the installed `mqtt` package for older installs that lack the bundle.
  * @returns {Promise<Function>} `mqtt.connect`.
  */
 async function loadMqttConnect() {
   let module;
   try {
-    module = await import('mqtt');
-  } catch (error) {
-    throw new Error(`The MQTT transport needs the "mqtt" package installed in this profile (${error instanceof Error ? error.message : String(error)}).`);
+    module = await import('./mqtt-bundle.cjs');
+  } catch (bundleError) {
+    try {
+      module = await import('mqtt');
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      const bundled = bundleError instanceof Error ? bundleError.message : String(bundleError);
+      throw new Error(`The MQTT transport could not load its bundled client or the "mqtt" package (bundle: ${bundled}; package: ${detail}).`);
+    }
   }
   const mqtt = module && module.default && typeof module.default.connect === 'function'
     ? module.default

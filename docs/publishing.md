@@ -123,7 +123,7 @@ git clone https://github.com/wreckglow/dsh-data-interflow.git
 plugin_manager install_bundle  target: <克隆下来的绝对路径>
 ```
 
-本地目录安装是 `link:`，`mqtt` 依赖不会自动装；从 GitHub 安装时 pnpm 会装依赖。若用克隆目录测试 MQTT，先在目录里执行：
+MQTT 客户端已内置在 `mqtt-bundle.cjs`，本地 `link:` 安装也不需要补装 `mqtt`；只有 bundle 缺失的旧版本才执行：
 
 ```bash
 pnpm install --prod --ignore-scripts
