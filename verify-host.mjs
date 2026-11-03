@@ -164,6 +164,12 @@ const listed = await call('interflow_tasks', {});
 console.log('multi task answer:', listed.ok, listed.tasks && listed.tasks[0] && listed.tasks[0].status, listed.tasks && listed.tasks[0] && listed.tasks[0].targets[0].status);
 console.log('multi tasks listed:', listed.ok, listed.tasks && listed.tasks.length);
 
+const cancellable = await call('interflow_run', { targets: ['peer-node'], subject: 'cancel me', body: 'wait' });
+const cancelled = await call('interflow_cancel', { taskId: cancellable.task.id });
+console.log('cancel task:', cancelled.ok, cancelled.task && cancelled.task.status, cancelled.task && cancelled.task.targets[0].status);
+const retried = await call('interflow_retry', { taskId: cancellable.task.id });
+console.log('retry task:', retried.ok, retried.task && retried.task.targets[0].status);
+
 console.log('panel remove ok:', (await callPanel('removePeer', { url: 'http://127.0.0.1:47991' })).ok);
 
 const switched = await callPanel('configureTransport', { transport: 'http' });

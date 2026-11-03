@@ -460,7 +460,9 @@ function createEngine(ctx, rawConfig) {
                   label: target.label,
                   nodeId: typeof target.nodeId === 'string' ? target.nodeId : '',
                   requestId: typeof target.requestId === 'string' ? target.requestId : '',
-                  status: target.status === 'answered' || target.status === 'error' ? target.status : 'timeout',
+                  status: target.status === 'answered' || target.status === 'error' || target.status === 'cancelled'
+                    ? target.status
+                    : 'timeout',
                   answer: typeof target.answer === 'string' ? target.answer : '',
                   error: target.status === 'timeout' ? 'plugin restarted before the answer arrived' : (typeof target.error === 'string' ? target.error : ''),
                   updatedAt: typeof target.updatedAt === 'string' ? target.updatedAt : nowIso(),
@@ -1204,7 +1206,7 @@ function createEngine(ctx, rawConfig) {
   function taskState(task) {
     const states = task.targets.map((target) => target.status);
     if (states.length > 0 && states.every((state) => state === 'answered')) return 'done';
-    if (states.length > 0 && states.every((state) => state === 'answered' || state === 'timeout' || state === 'error')) {
+    if (states.length > 0 && states.every((state) => state === 'answered' || state === 'timeout' || state === 'error' || state === 'cancelled')) {
       return states.some((state) => state === 'answered') ? 'partial' : 'failed';
     }
     return 'running';
@@ -1236,6 +1238,29 @@ function createEngine(ctx, rawConfig) {
   /** @returns {object[]} Recent tasks, newest first. */
   function tasksView() {
     return tasks.slice(-20).reverse().map(taskView);
+  }
+
+  /**
+   * Arm or re-arm the timeout guard for one task.
+   * @param {object} task - Task record.
+   */
+  function armTaskTimer(task) {
+    if (task.timer) clearTimeout(task.timer);
+    task.timer = setTimeout(() => {
+      let changed = false;
+      for (const target of task.targets) {
+        if (target.status !== 'waiting') continue;
+        target.status = 'timeout';
+        target.error = 'no answer before timeout';
+        target.updatedAt = nowIso();
+        changed = true;
+      }
+      if (changed) {
+        task.status = taskState(task);
+        schedulePersist();
+      }
+    }, config.requestTimeoutMs + 5000);
+    if (typeof task.timer.unref === 'function') task.timer.unref();
   }
 
   /**
@@ -1330,22 +1355,75 @@ function createEngine(ctx, rawConfig) {
     tasks.push(task);
     if (tasks.length > 30) tasks = tasks.slice(-30);
     schedulePersist();
-    const timer = setTimeout(() => {
-      let changed = false;
-      for (const target of task.targets) {
-        if (target.status !== 'waiting') continue;
-        target.status = 'timeout';
-        target.error = 'no answer before timeout';
+    armTaskTimer(task);
+    return taskView(task);
+  }
+
+  /**
+   * Re-send failed, timed-out, or cancelled targets of one task.
+   * @param {{taskId?:string, targets?:string[]}} input - Task and optional target filter.
+   * @returns {Promise<object>} Updated task view.
+   */
+  async function retryTask(input) {
+    const taskId = clampText(input && input.taskId, 120);
+    const task = tasks.find((candidate) => candidate.id === taskId);
+    if (!task) throw new InterflowError('task_not_found', 'No such task.');
+    const only = Array.isArray(input && input.targets)
+      ? new Set(input.targets.map((value) => clampText(value, 200)).filter(Boolean))
+      : null;
+    let retried = 0;
+    for (const target of task.targets) {
+      if (target.status !== 'timeout' && target.status !== 'error' && target.status !== 'cancelled') continue;
+      if (only && !only.has(target.label) && !only.has(target.nodeId)) continue;
+      const to = target.nodeId || target.label;
+      try {
+        const sent = await sendMessage({ to, kind: 'request', subject: task.subject, body: task.body });
+        target.requestId = sent.id;
+        target.status = 'waiting';
+        target.answer = '';
+        target.error = '';
         target.updatedAt = nowIso();
-        changed = true;
+        retried += 1;
+      } catch (error) {
+        target.status = 'error';
+        target.error = error instanceof Error ? error.message : String(error);
+        target.updatedAt = nowIso();
       }
-      if (changed) {
-        task.status = taskState(task);
-        schedulePersist();
-      }
-    }, config.requestTimeoutMs + 5000);
-    if (typeof timer.unref === 'function') timer.unref();
-    task.timer = timer;
+    }
+    if (retried === 0) {
+      throw new InterflowError('nothing_to_retry', 'This task has no failed, timed-out, or cancelled targets to retry.');
+    }
+    task.status = taskState(task);
+    schedulePersist();
+    armTaskTimer(task);
+    return taskView(task);
+  }
+
+  /**
+   * Mark waiting targets of one task cancelled. Remote work already started is
+   * not interrupted; the local task simply stops waiting.
+   * @param {{taskId?:string}} input - Task to cancel.
+   * @returns {object} Updated task view.
+   */
+  function cancelTask(input) {
+    const taskId = clampText(input && input.taskId, 120);
+    const task = tasks.find((candidate) => candidate.id === taskId);
+    if (!task) throw new InterflowError('task_not_found', 'No such task.');
+    let changed = false;
+    for (const target of task.targets) {
+      if (target.status !== 'waiting') continue;
+      target.status = 'cancelled';
+      target.error = 'cancelled locally';
+      target.updatedAt = nowIso();
+      changed = true;
+    }
+    if (!changed) throw new InterflowError('nothing_to_cancel', 'This task has no waiting targets.');
+    if (task.timer) {
+      clearTimeout(task.timer);
+      task.timer = null;
+    }
+    task.status = taskState(task);
+    schedulePersist();
     return taskView(task);
   }
 
@@ -2213,7 +2291,7 @@ function createEngine(ctx, rawConfig) {
       nodeName,
       mainNode: config.mainNode === true,
       skills: localSkillNames(),
-      presenceIntervalMs: Math.max(15000, config.pollMs * 5),
+      presenceIntervalMs: Math.max(5000, Math.min(30000, Math.floor(config.presenceWindowMs / 3))),
       onEvent: (event) => {
         ingestRemote(event);
       },
@@ -2251,6 +2329,8 @@ function createEngine(ctx, rawConfig) {
     sendMessage,
     requestRemote,
     runTask,
+    retryTask,
+    cancelTask,
     tasksView,
     configureTransport,
     addPeer,
@@ -2566,6 +2646,27 @@ const PARAMETER_SCHEMAS = {
       body: { type: 'string', description: 'Task text sent to every selected device, at most 16000 characters.' },
     },
   },
+  retry: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['taskId'],
+    properties: {
+      taskId: { type: 'string', description: 'Task id returned by interflow_run.' },
+      targets: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional subset of labels/ids to retry; omitted retries every failed, timed-out, or cancelled target.',
+      },
+    },
+  },
+  cancel: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['taskId'],
+    properties: {
+      taskId: { type: 'string', description: 'Task id returned by interflow_run.' },
+    },
+  },
   tasks: { type: 'object', additionalProperties: false, properties: {} },
   inbox: {
     type: 'object',
@@ -2657,6 +2758,20 @@ function registerTools(ctx, engine) {
     execute: (args) => runTool(() => Promise.resolve({ tasks: engine.tasksView() }), args),
   });
   ctx.tools.register({
+    name: 'interflow_retry',
+    description: 'Retry failed, timed-out, or cancelled targets of a multi-target task.',
+    parameters: PARAMETER_SCHEMAS.retry,
+    output: { schema: RUN_OUTPUT_SCHEMA, render: renderJson },
+    execute: (args) => runTool(async (input) => ({ task: await engine.retryTask(input) }), args),
+  });
+  ctx.tools.register({
+    name: 'interflow_cancel',
+    description: 'Stop waiting on a multi-target task. Remote work already started is not interrupted.',
+    parameters: PARAMETER_SCHEMAS.cancel,
+    output: { schema: RUN_OUTPUT_SCHEMA, render: renderJson },
+    execute: (args) => runTool(async (input) => ({ task: engine.cancelTask(input) }), args),
+  });
+  ctx.tools.register({
     name: 'interflow_inbox',
     description: INBOX_DESCRIPTION,
     parameters: PARAMETER_SCHEMAS.inbox,
@@ -2711,6 +2826,10 @@ async function handlePanelRequest(request, engine) {
         return Response.json({ ok: true, value: await engine.sendMessage(payload) });
       case 'run':
         return Response.json({ ok: true, value: await engine.runTask(payload) });
+      case 'retry':
+        return Response.json({ ok: true, value: await engine.retryTask(payload) });
+      case 'cancel':
+        return Response.json({ ok: true, value: engine.cancelTask(payload) });
       case 'addPeer':
         return Response.json({ ok: true, value: await engine.addPeer(payload) });
       case 'removePeer':

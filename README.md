@@ -201,9 +201,9 @@ interflow_run  targets: ["*"]                subject: "检查"  body: "报告当
 interflow_tasks
 ```
 
-每个目标的状态是 `waiting / answered / timeout / error`，任务整体是 `running / done / partial / failed`。答案异步回来，不会阻塞发送。
+每个目标的状态是 `waiting / answered / timeout / error / cancelled`，任务整体是 `running / done / partial / failed`。答案异步回来，不会阻塞发送。任务卡片可以「取消等待」和「重试失败/超时目标」；取消只停止本地等待，不会中断远端已经开始的会话。
 
-当前这版是 P0 编排：每个目标一个请求，没有重试/取消/文件附件；真正的文件/工作区数据要接 Syncthing/Git 或后续的分块传输。
+当前这版是 P0 编排：每个目标一个请求，没有文件附件；真正的文件/工作区数据要接 Syncthing/Git 或后续的分块传输。
 
 ---
 
@@ -269,6 +269,8 @@ interflow_tasks
 | `interflow_request` | 请一个实例执行任务并回传结果；必须指定单个目标 |
 | `interflow_run` | 同一任务发给多个目标；`targets: ["*"]` 表示所有已知节点 |
 | `interflow_tasks` | 查看多目标任务及每个目标的回答状态 |
+| `interflow_retry` | 重试任务里失败/超时/取消的目标 |
+| `interflow_cancel` | 取消任务的本地等待；不中断远端已开始的会话 |
 | `interflow_inbox` | 读收件箱；可只读未读、按来源过滤、用 id 读全文 |
 | `interflow_peers` | 查看本机角色、传输、地址、发现的节点和在线状态 |
 | `interflow_connect` | 对等模式下按 URL 添加/移除节点 |

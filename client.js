@@ -131,6 +131,11 @@ window.__ModuleLoader__.load({
       'tasks.partial': '部分完成',
       'tasks.failed': '全部失败',
       'tasks.runningStatus': '运行中',
+      'tasks.retry': '重试失败目标',
+      'tasks.cancel': '取消等待',
+      'tasks.retried': '已重试失败/超时目标。',
+      'tasks.cancelled': '任务已取消等待。',
+      'tasks.cancelledTarget': '已取消',
       'peers.mqttConnected': 'MQTT 已连接',
       'peers.mqttConnecting': 'MQTT 连接中',
       'peers.mqttError': 'MQTT 连接异常',
@@ -307,6 +312,11 @@ window.__ModuleLoader__.load({
       'tasks.partial': 'partial',
       'tasks.failed': 'failed',
       'tasks.runningStatus': 'running',
+      'tasks.retry': 'Retry failed',
+      'tasks.cancel': 'Cancel waiting',
+      'tasks.retried': 'Retried failed or timed-out targets.',
+      'tasks.cancelled': 'Task cancelled locally.',
+      'tasks.cancelledTarget': 'cancelled',
       'peers.mqttConnected': 'MQTT connected',
       'peers.mqttConnecting': 'MQTT connecting',
       'peers.mqttError': 'MQTT error',
@@ -803,6 +813,18 @@ window.__ModuleLoader__.load({
         return result;
       });
 
+      const retryTask = (taskId) => run('retry', async () => {
+        await rpc('retry', { taskId });
+        await refresh();
+        report(t('tasks.retried'));
+      });
+
+      const cancelTask = (taskId) => run('cancel', async () => {
+        await rpc('cancel', { taskId });
+        await refresh();
+        report(t('tasks.cancelled'));
+      });
+
       const copyAddress = async () => {
         const settings = snapshot.settings || {};
         const url = settings.transport === 'mqtt'
@@ -936,6 +958,8 @@ window.__ModuleLoader__.load({
                   onConfigure: (input) => configureTransport(input),
                   onDelegate: delegate,
                   onRun: (input) => runTask(input),
+                  onRetry: (id) => retryTask(id),
+                  onCancel: (id) => cancelTask(id),
                 }),
             ),
           ),
@@ -1410,7 +1434,7 @@ window.__ModuleLoader__.load({
      * @param {object} props - Snapshot and actions.
      * @returns {object} React element.
      */
-    function PeersPanel({ t, snapshot, busy, onAdd, onRemove, onConfigure, onDelegate, onRun }) {
+    function PeersPanel({ t, snapshot, busy, onAdd, onRemove, onConfigure, onDelegate, onRun, onRetry, onCancel }) {
       const [url, setUrl] = React.useState('');
       const [label, setLabel] = React.useState('');
       const [token, setToken] = React.useState('');
@@ -1450,7 +1474,7 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'ifx-stack' },
         h(MqttCard, { t, snapshot, busy, onConfigure }),
         h(SkillsCard, { t, snapshot, onDelegate }),
-        h(TasksCard, { t, snapshot, busy: busy === 'run', onRun }),
+        h(TasksCard, { t, snapshot, busy: busy === 'run' || busy === 'retry' || busy === 'cancel', onRun, onRetry, onCancel }),
         role === 'spoke' || transport === 'mqtt'
           ? null
           : h('section', { className: 'ifx-card' },
@@ -1732,7 +1756,7 @@ window.__ModuleLoader__.load({
      * @param {object} props - Snapshot, busy state, and run action.
      * @returns {object} React element.
      */
-    function TasksCard({ t, snapshot, busy, onRun }) {
+    function TasksCard({ t, snapshot, busy, onRun, onRetry, onCancel }) {
       const peers = snapshot.peers || [];
       const tasks = snapshot.tasks || [];
       const [selected, setSelected] = React.useState([]);
@@ -1765,6 +1789,7 @@ window.__ModuleLoader__.load({
         if (status === 'answered') return t('tasks.answered');
         if (status === 'timeout') return t('tasks.timeout');
         if (status === 'error') return t('tasks.error');
+        if (status === 'cancelled') return t('tasks.cancelledTarget');
         return t('tasks.waiting');
       };
       const renderTask = (task) => h('article', { key: task.id, className: 'ifx-peer-card' },
@@ -1782,6 +1807,14 @@ window.__ModuleLoader__.load({
         target.answer ? h('div', { className: 'ifx-peer-meta' }, target.answer.slice(0, 500)) : null,
         target.error ? h('div', { className: 'ifx-peer-error' }, target.error) : null,
         ))),
+        h('div', { className: 'ifx-compose-foot' },
+          task.targets.some((target) => target.status === 'waiting')
+            ? h('button', { className: 'ifx-btn ghost', disabled: busy, onClick: () => onCancel(task.id) }, t('tasks.cancel'))
+            : null,
+          task.targets.some((target) => target.status === 'timeout' || target.status === 'error' || target.status === 'cancelled')
+            ? h('button', { className: 'ifx-btn ghost', disabled: busy, onClick: () => onRetry(task.id) }, t('tasks.retry'))
+            : null,
+        ),
       );
 
       return h('section', { className: 'ifx-card' },
