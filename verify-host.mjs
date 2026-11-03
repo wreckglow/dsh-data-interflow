@@ -135,6 +135,35 @@ const panelPeers = await callPanel('addPeer', { url: 'http://127.0.0.1:47991', l
 console.log('panel addPeer ok:', panelPeers.ok, 'added:', panelPeers.value && panelPeers.value.added);
 const panelSend = await callPanel('send', { to: 'panel-fake', subject: 'panel', body: 'from panel route' });
 console.log('panel send ok:', panelSend.ok, 'id:', panelSend.value && panelSend.value.id);
+
+const multi = await call('interflow_run', { targets: ['peer-node'], subject: 'multi', body: 'do it' });
+console.log('multi task:', multi.ok, multi.task && multi.task.status, multi.task && multi.task.targets.length);
+const selfInfo = await call('interflow_peers');
+const requestId = multi.task && multi.task.targets[0] && multi.task.targets[0].requestId;
+if (requestId) {
+  await fetch('http://127.0.0.1:47990/ingest', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      events: [{
+        id: 'task-answer-1',
+        ts: new Date().toISOString(),
+        origin: 'peer-node',
+        originName: 'Fake Peer',
+        to: selfInfo.self.id,
+        kind: 'answer',
+        subject: 'Re: multi',
+        body: 'done',
+        replyTo: requestId,
+      }],
+    }),
+  });
+  await wait(300);
+}
+const listed = await call('interflow_tasks', {});
+console.log('multi task answer:', listed.ok, listed.tasks && listed.tasks[0] && listed.tasks[0].status, listed.tasks && listed.tasks[0] && listed.tasks[0].targets[0].status);
+console.log('multi tasks listed:', listed.ok, listed.tasks && listed.tasks.length);
+
 console.log('panel remove ok:', (await callPanel('removePeer', { url: 'http://127.0.0.1:47991' })).ok);
 
 const switched = await callPanel('configureTransport', { transport: 'http' });

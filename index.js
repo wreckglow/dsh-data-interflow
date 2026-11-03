@@ -337,6 +337,8 @@ function createEngine(ctx, rawConfig) {
   let mqttMembers = [];
   /** Skills this instance can offer to the mesh. */
   let localSkills = [];
+  /** Multi-target tasks created from this instance. */
+  let tasks = [];
   let mqttStatus = 'idle';
   let mqttError = '';
   /** @type {{start:Function,stop:Function,publish:Function,getMembers:Function,getStatus:Function}|null} */
@@ -442,6 +444,33 @@ function createEngine(ctx, rawConfig) {
         transportOverride = state.transportOverride;
       }
       if (typeof state.mainNode === 'boolean') config.mainNode = state.mainNode;
+      if (Array.isArray(state.tasks)) {
+        tasks = state.tasks
+          .filter((raw) => raw && typeof raw.id === 'string' && raw.id && Array.isArray(raw.targets))
+          .map((raw) => {
+            const task = {
+              id: raw.id,
+              subject: clampText(raw.subject, MAX_SUBJECT) || '(task)',
+              body: clampText(raw.body, MAX_MESSAGE_BODY),
+              createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : nowIso(),
+              status: 'running',
+              targets: raw.targets
+                .filter((target) => target && typeof target.label === 'string')
+                .map((target) => ({
+                  label: target.label,
+                  nodeId: typeof target.nodeId === 'string' ? target.nodeId : '',
+                  requestId: typeof target.requestId === 'string' ? target.requestId : '',
+                  status: target.status === 'answered' || target.status === 'error' ? target.status : 'timeout',
+                  answer: typeof target.answer === 'string' ? target.answer : '',
+                  error: target.status === 'timeout' ? 'plugin restarted before the answer arrived' : (typeof target.error === 'string' ? target.error : ''),
+                  updatedAt: typeof target.updatedAt === 'string' ? target.updatedAt : nowIso(),
+                })),
+            };
+            task.status = taskState(task);
+            return task;
+          })
+          .slice(-20);
+      }
     }
     if (!nodeId) nodeId = uuid();
 
@@ -588,6 +617,22 @@ function createEngine(ctx, rawConfig) {
       removedPeers: [...removedPeers].slice(-100),
       readIds: [...readIds].slice(-2000),
       handledRequests: [...handledRequests].slice(-500),
+      tasks: tasks.slice(-20).map((task) => ({
+        id: task.id,
+        subject: task.subject,
+        body: task.body,
+        createdAt: task.createdAt,
+        status: task.status,
+        targets: task.targets.map((target) => ({
+          label: target.label,
+          nodeId: target.nodeId,
+          requestId: target.requestId,
+          status: target.status,
+          answer: target.answer,
+          error: target.error,
+          updatedAt: target.updatedAt,
+        })),
+      })),
       transportOverride,
     };
     const temporary = `${stateFile}.tmp`;
@@ -1038,6 +1083,7 @@ function createEngine(ctx, rawConfig) {
     trimEvents();
     appendLine(record);
     schedulePersist();
+    trackTaskAnswer(event);
     if (event.kind === 'request' && event.to !== '*' && isForMe(event)) {
       queueMicrotask(() => {
         runRequest(event).catch((error) => warn(error));
@@ -1148,6 +1194,159 @@ function createEngine(ctx, rawConfig) {
           ? members.length
           : peers.length,
     };
+  }
+
+  /**
+   * Aggregate the status of one multi-target task.
+   * @param {object} task - Task record.
+   * @returns {'running'|'done'|'partial'|'failed'} Aggregate status.
+   */
+  function taskState(task) {
+    const states = task.targets.map((target) => target.status);
+    if (states.length > 0 && states.every((state) => state === 'answered')) return 'done';
+    if (states.length > 0 && states.every((state) => state === 'answered' || state === 'timeout' || state === 'error')) {
+      return states.some((state) => state === 'answered') ? 'partial' : 'failed';
+    }
+    return 'running';
+  }
+
+  /**
+   * Panel/tool view of one task.
+   * @param {object} task - Task record.
+   * @returns {object} JSON-safe view.
+   */
+  function taskView(task) {
+    return {
+      id: task.id,
+      subject: task.subject,
+      status: task.status,
+      createdAt: task.createdAt,
+      targets: task.targets.map((target) => ({
+        label: target.label,
+        nodeId: target.nodeId || '',
+        requestId: target.requestId || '',
+        status: target.status,
+        answer: target.answer || '',
+        error: target.error || '',
+        updatedAt: target.updatedAt || '',
+      })),
+    };
+  }
+
+  /** @returns {object[]} Recent tasks, newest first. */
+  function tasksView() {
+    return tasks.slice(-20).reverse().map(taskView);
+  }
+
+  /**
+   * Update a task when an answer correlated by `replyTo` arrives.
+   * @param {object} event - Incoming event.
+   */
+  function trackTaskAnswer(event) {
+    if (!event || !event.replyTo) return;
+    for (const task of tasks) {
+      for (const target of task.targets) {
+        if (target.requestId !== event.replyTo) continue;
+        target.status = 'answered';
+        target.answer = clampText(event.body, 4000);
+        target.error = '';
+        target.updatedAt = nowIso();
+        task.status = taskState(task);
+        schedulePersist();
+      }
+    }
+  }
+
+  /**
+   * Send the same request to several targets and track their answers.
+   * @param {{targets?:string[], subject?:string, body?:string}} input - Task fields.
+   * @returns {Promise<object>} Created task view.
+   */
+  async function runTask(input) {
+    const body = clampText(input && input.body, MAX_MESSAGE_BODY);
+    if (!body) throw new InterflowError('empty_task', 'A task needs a body.');
+    const requested = Array.isArray(input && input.targets)
+      ? input.targets.map((value) => clampText(value, 200)).filter(Boolean)
+      : [];
+    if (requested.length === 0) {
+      throw new InterflowError('task_targets_required', 'Choose at least one target, or ["*"] for every known node.');
+    }
+    const views = deviceViews();
+    const all = requested.some((value) => value === '*' || value.toLowerCase() === 'all');
+    const selected = [];
+    if (all) selected.push(...views);
+    else {
+      for (const name of requested) {
+        const lowered = name.toLowerCase();
+        const match = views.find((view) => view.nodeId === name
+          || (view.nodeName && view.nodeName.toLowerCase() === lowered)
+          || (view.label && view.label.toLowerCase() === lowered)
+          || view.url === name);
+        if (match) selected.push(match);
+      }
+    }
+    const unique = new Map();
+    for (const view of selected) {
+      unique.set(view.nodeId || view.url || view.label, view);
+    }
+    if (unique.size === 0) {
+      throw new InterflowError('no_task_targets', 'No known node matches those targets.');
+    }
+    const subject = clampText(input && input.subject, MAX_SUBJECT) || `任务：${body.slice(0, 40)}`;
+    const task = {
+      id: uuid(),
+      subject,
+      body,
+      createdAt: nowIso(),
+      status: 'running',
+      targets: [],
+    };
+    for (const view of unique.values()) {
+      const to = view.nodeId || view.url || view.nodeName || view.label;
+      try {
+        const sent = await sendMessage({ to, kind: 'request', subject, body });
+        task.targets.push({
+          label: view.label || view.nodeName || to,
+          nodeId: view.nodeId || '',
+          requestId: sent.id,
+          status: 'waiting',
+          answer: '',
+          error: '',
+          updatedAt: nowIso(),
+        });
+      } catch (error) {
+        task.targets.push({
+          label: view.label || view.nodeName || to,
+          nodeId: view.nodeId || '',
+          requestId: '',
+          status: 'error',
+          answer: '',
+          error: error instanceof Error ? error.message : String(error),
+          updatedAt: nowIso(),
+        });
+      }
+    }
+    task.status = taskState(task);
+    tasks.push(task);
+    if (tasks.length > 30) tasks = tasks.slice(-30);
+    schedulePersist();
+    const timer = setTimeout(() => {
+      let changed = false;
+      for (const target of task.targets) {
+        if (target.status !== 'waiting') continue;
+        target.status = 'timeout';
+        target.error = 'no answer before timeout';
+        target.updatedAt = nowIso();
+        changed = true;
+      }
+      if (changed) {
+        task.status = taskState(task);
+        schedulePersist();
+      }
+    }, config.requestTimeoutMs + 5000);
+    if (typeof timer.unref === 'function') timer.unref();
+    task.timer = timer;
+    return taskView(task);
   }
 
   /**
@@ -1793,7 +1992,9 @@ function createEngine(ctx, rawConfig) {
     return {
       self: { id: nodeId, name: nodeName, version: VERSION, mainNode: config.mainNode === true, skills: localSkillNames() },
       listen: { ...listenState },
-      peers: deviceViews(),      messages: page.map((record) => messageView(record, urls)),
+      peers: deviceViews(),
+      tasks: tasksView(),
+      messages: page.map((record) => messageView(record, urls)),
       unread: unreadCount(),
       firstSeq,
       lastSeq: seq,
@@ -2049,6 +2250,8 @@ function createEngine(ctx, rawConfig) {
     recordRpcError,
     sendMessage,
     requestRemote,
+    runTask,
+    tasksView,
     configureTransport,
     addPeer,
     removePeer,
@@ -2274,6 +2477,52 @@ const CONNECT_OUTPUT_SCHEMA = {
   },
 };
 
+const TASK_TARGET_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    label: { type: 'string' },
+    nodeId: { type: 'string' },
+    requestId: { type: 'string' },
+    status: { type: 'string' },
+    answer: { type: 'string' },
+    error: { type: 'string' },
+    updatedAt: { type: 'string' },
+  },
+};
+
+const TASK_VIEW_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'string' },
+    subject: { type: 'string' },
+    status: { type: 'string' },
+    createdAt: { type: 'string' },
+    targets: { type: 'array', items: TASK_TARGET_SCHEMA },
+  },
+};
+
+const RUN_OUTPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    ok: { type: 'boolean' },
+    task: TASK_VIEW_SCHEMA,
+    ...ERROR_PROPERTIES,
+  },
+};
+
+const TASKS_OUTPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    ok: { type: 'boolean' },
+    tasks: { type: 'array', items: TASK_VIEW_SCHEMA },
+    ...ERROR_PROPERTIES,
+  },
+};
+
 const PARAMETER_SCHEMAS = {
   send: {
     type: 'object',
@@ -2303,6 +2552,21 @@ const PARAMETER_SCHEMAS = {
       body: { type: 'string', description: 'The task for the other DSH instance to execute, at most 16000 characters.' },
     },
   },
+  run: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['targets', 'body'],
+    properties: {
+      targets: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Device labels/names/ids; use ["*"] for every known node.',
+      },
+      subject: { type: 'string', description: 'Short task summary, at most 200 characters.' },
+      body: { type: 'string', description: 'Task text sent to every selected device, at most 16000 characters.' },
+    },
+  },
+  tasks: { type: 'object', additionalProperties: false, properties: {} },
   inbox: {
     type: 'object',
     additionalProperties: false,
@@ -2379,6 +2643,20 @@ function registerTools(ctx, engine) {
     execute: (args) => runTool((input) => engine.requestRemote(input), args),
   });
   ctx.tools.register({
+    name: 'interflow_run',
+    description: 'Send the same task to several DSH instances at once. Use ["*"] for every known node. Returns a task id; answers arrive asynchronously and are visible in interflow_tasks or the task panel.',
+    parameters: PARAMETER_SCHEMAS.run,
+    output: { schema: RUN_OUTPUT_SCHEMA, render: renderJson },
+    execute: (args) => runTool(async (input) => ({ task: await engine.runTask(input) }), args),
+  });
+  ctx.tools.register({
+    name: 'interflow_tasks',
+    description: 'List recent multi-target tasks created by this instance, with each target status and answer.',
+    parameters: PARAMETER_SCHEMAS.tasks,
+    output: { schema: TASKS_OUTPUT_SCHEMA, render: renderJson },
+    execute: (args) => runTool(() => Promise.resolve({ tasks: engine.tasksView() }), args),
+  });
+  ctx.tools.register({
     name: 'interflow_inbox',
     description: INBOX_DESCRIPTION,
     parameters: PARAMETER_SCHEMAS.inbox,
@@ -2431,6 +2709,8 @@ async function handlePanelRequest(request, engine) {
         return Response.json({ ok: true, value: engine.snapshot(payload) });
       case 'send':
         return Response.json({ ok: true, value: await engine.sendMessage(payload) });
+      case 'run':
+        return Response.json({ ok: true, value: await engine.runTask(payload) });
       case 'addPeer':
         return Response.json({ ok: true, value: await engine.addPeer(payload) });
       case 'removePeer':

@@ -112,6 +112,25 @@ window.__ModuleLoader__.load({
       'skills.delegated': '已填入请求，补充任务内容后发送。',
       'skills.localHint': '这些技能在本机；其他节点会通过主节点请求使用。',
       'skills.remoteHint': '委派会向主节点发一条执行请求，由它用本地技能执行。',
+      'tasks.title': '多目标任务',
+      'tasks.count': '{count} 个任务',
+      'tasks.all': '所有已知节点',
+      'tasks.subject': '任务主题',
+      'tasks.body': '任务内容',
+      'tasks.hint': '同一任务发给选中的每台设备，结果按设备汇总。',
+      'tasks.run': '运行任务',
+      'tasks.running': '运行中…',
+      'tasks.started': '任务已发送，等待各节点回复。',
+      'tasks.empty': '还没有多目标任务。',
+      'tasks.noPeers': '先接入至少一个节点，才能运行多目标任务。',
+      'tasks.waiting': '等待',
+      'tasks.answered': '已回复',
+      'tasks.timeout': '超时',
+      'tasks.error': '失败',
+      'tasks.done': '全部完成',
+      'tasks.partial': '部分完成',
+      'tasks.failed': '全部失败',
+      'tasks.runningStatus': '运行中',
       'peers.mqttConnected': 'MQTT 已连接',
       'peers.mqttConnecting': 'MQTT 连接中',
       'peers.mqttError': 'MQTT 连接异常',
@@ -269,6 +288,25 @@ window.__ModuleLoader__.load({
       'skills.delegated': 'Request drafted; add the task and send.',
       'skills.localHint': 'These skills live here; other nodes use them by asking this node.',
       'skills.remoteHint': 'Delegating sends a request to the main node, which runs its local skill.',
+      'tasks.title': 'Multi-target tasks',
+      'tasks.count': '{count} tasks',
+      'tasks.all': 'All known nodes',
+      'tasks.subject': 'Task subject',
+      'tasks.body': 'Task body',
+      'tasks.hint': 'The same task goes to every selected device; results are grouped by device.',
+      'tasks.run': 'Run task',
+      'tasks.running': 'Running…',
+      'tasks.started': 'Task sent; waiting for replies.',
+      'tasks.empty': 'No multi-target tasks yet.',
+      'tasks.noPeers': 'Connect at least one node before running a multi-target task.',
+      'tasks.waiting': 'waiting',
+      'tasks.answered': 'answered',
+      'tasks.timeout': 'timeout',
+      'tasks.error': 'error',
+      'tasks.done': 'done',
+      'tasks.partial': 'partial',
+      'tasks.failed': 'failed',
+      'tasks.runningStatus': 'running',
       'peers.mqttConnected': 'MQTT connected',
       'peers.mqttConnecting': 'MQTT connecting',
       'peers.mqttError': 'MQTT error',
@@ -758,6 +796,13 @@ window.__ModuleLoader__.load({
         report(t('mqtt.saved'));
       });
 
+      const runTask = (input) => run('run', async () => {
+        const result = await rpc('run', input);
+        await refresh();
+        report(t('tasks.started'));
+        return result;
+      });
+
       const copyAddress = async () => {
         const settings = snapshot.settings || {};
         const url = settings.transport === 'mqtt'
@@ -890,6 +935,7 @@ window.__ModuleLoader__.load({
                   onRemove: (url) => removePeer(url),
                   onConfigure: (input) => configureTransport(input),
                   onDelegate: delegate,
+                  onRun: (input) => runTask(input),
                 }),
             ),
           ),
@@ -1364,7 +1410,7 @@ window.__ModuleLoader__.load({
      * @param {object} props - Snapshot and actions.
      * @returns {object} React element.
      */
-    function PeersPanel({ t, snapshot, busy, onAdd, onRemove, onConfigure, onDelegate }) {
+    function PeersPanel({ t, snapshot, busy, onAdd, onRemove, onConfigure, onDelegate, onRun }) {
       const [url, setUrl] = React.useState('');
       const [label, setLabel] = React.useState('');
       const [token, setToken] = React.useState('');
@@ -1404,6 +1450,7 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'ifx-stack' },
         h(MqttCard, { t, snapshot, busy, onConfigure }),
         h(SkillsCard, { t, snapshot, onDelegate }),
+        h(TasksCard, { t, snapshot, busy: busy === 'run', onRun }),
         role === 'spoke' || transport === 'mqtt'
           ? null
           : h('section', { className: 'ifx-card' },
@@ -1681,6 +1728,123 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Multi-target task composer and recent task results.
+     * @param {object} props - Snapshot, busy state, and run action.
+     * @returns {object} React element.
+     */
+    function TasksCard({ t, snapshot, busy, onRun }) {
+      const peers = snapshot.peers || [];
+      const tasks = snapshot.tasks || [];
+      const [selected, setSelected] = React.useState([]);
+      const [all, setAll] = React.useState(false);
+      const [subject, setSubject] = React.useState('');
+      const [body, setBody] = React.useState('');
+      const keys = peers.map((peer) => peer.nodeId || peer.url || peer.nodeName || peer.label).filter(Boolean);
+      const toggle = (key) => setSelected((current) => (current.includes(key)
+        ? current.filter((value) => value !== key)
+        : [...current, key]));
+      const run = () => {
+        const targets = all ? ['*'] : selected;
+        if (busy || !body.trim() || targets.length === 0) return;
+        onRun({ targets, subject: subject.trim(), body: body.trim() })
+          .then(() => {
+            setBody('');
+            setSelected([]);
+            setAll(false);
+          })
+          .catch(() => {});
+      };
+      const statusText = (status) => {
+        if (status === 'done') return t('tasks.done');
+        if (status === 'partial') return t('tasks.partial');
+        if (status === 'failed') return t('tasks.failed');
+        if (status === 'running') return t('tasks.runningStatus');
+        return status;
+      };
+      const targetText = (status) => {
+        if (status === 'answered') return t('tasks.answered');
+        if (status === 'timeout') return t('tasks.timeout');
+        if (status === 'error') return t('tasks.error');
+        return t('tasks.waiting');
+      };
+      const renderTask = (task) => h('article', { key: task.id, className: 'ifx-peer-card' },
+        h('div', { className: 'ifx-peer-top' },
+          h('span', { className: 'ifx-peer-name' }, task.subject),
+          h('span', { className: 'ifx-peer-state' }, statusText(task.status)),
+        ),
+        h('div', { className: 'ifx-peer-meta' }, new Date(task.createdAt).toLocaleString()),
+        h('div', { className: 'ifx-task-targets' }, task.targets.map((target) => h('div', {
+          key: target.requestId || target.label,
+          className: 'ifx-task-row',
+        },
+        h('span', { className: 'ifx-peer-name' }, target.label),
+        h('span', { className: 'ifx-peer-state' }, targetText(target.status)),
+        target.answer ? h('div', { className: 'ifx-peer-meta' }, target.answer.slice(0, 500)) : null,
+        target.error ? h('div', { className: 'ifx-peer-error' }, target.error) : null,
+        ))),
+      );
+
+      return h('section', { className: 'ifx-card' },
+        h('div', { className: 'ifx-card-head' },
+          h('h2', { className: 'ifx-card-title' }, t('tasks.title')),
+          h('span', { className: 'ifx-card-note' }, t('tasks.count', { count: tasks.length })),
+        ),
+        peers.length === 0
+          ? h('div', { className: 'ifx-hint' }, t('tasks.noPeers'))
+          : h('div', null,
+            h('label', { className: 'ifx-check' },
+              h('input', {
+                type: 'checkbox',
+                checked: all,
+                onChange: (event) => setAll(event.target.checked),
+              }),
+              h('span', null, t('tasks.all')),
+            ),
+            h('div', { className: 'ifx-task-targets' }, peers.map((peer) => {
+              const key = peer.nodeId || peer.url || peer.nodeName || peer.label;
+              return h('label', { key, className: 'ifx-check' },
+                h('input', {
+                  type: 'checkbox',
+                  checked: all || selected.includes(key),
+                  disabled: all,
+                  onChange: () => toggle(key),
+                }),
+                h('span', null, peer.label || peer.nodeName || peer.url),
+              );
+            })),
+            h('label', { className: 'ifx-field ifx-block ifx-top-gap' },
+              h('span', { className: 'ifx-label' }, t('tasks.subject')),
+              h('input', {
+                className: 'ifx-input',
+                value: subject,
+                onChange: (event) => setSubject(event.target.value),
+              }),
+            ),
+            h('label', { className: 'ifx-field ifx-block' },
+              h('span', { className: 'ifx-label' }, t('tasks.body')),
+              h('textarea', {
+                className: 'ifx-input',
+                rows: 3,
+                value: body,
+                onChange: (event) => setBody(event.target.value),
+              }),
+            ),
+            h('div', { className: 'ifx-compose-foot' },
+              h('span', { className: 'ifx-hint' }, t('tasks.hint')),
+              h('button', {
+                className: 'ifx-btn primary',
+                disabled: busy || !body.trim() || (!all && selected.length === 0),
+                onClick: run,
+              }, busy ? t('tasks.running') : t('tasks.run')),
+            ),
+          ),
+        tasks.length === 0
+          ? h('div', { className: 'ifx-hint ifx-top-gap' }, t('tasks.empty'))
+          : h('div', { className: 'ifx-stack ifx-top-gap' }, tasks.map(renderTask)),
+      );
+    }
+
+    /**
      * One peer tile.
      * @param {object} props - Peer and actions.
      * @returns {object} React element.
@@ -1872,6 +2036,9 @@ window.__ModuleLoader__.load({
 .ifx-hint{margin:0;font-size:11.5px;color:var(--dsw-alias-label-secondary);}
 .ifx-check{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12px;color:var(--dsw-alias-label-secondary);}
 .ifx-check input{width:14px;height:14px;accent-color:var(--dsw-alias-brand-primary);}
+.ifx-task-targets{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
+.ifx-task-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;width:100%;padding-top:7px;margin-top:7px;border-top:1px dashed var(--dsw-alias-border-l1);}
+.ifx-task-row .ifx-peer-meta{width:100%;}
 .ifx-peer-card .ifx-compose-foot{margin-top:10px;}
 @keyframes ifx-pulse{0%{transform:scale(.86);opacity:.85}70%{transform:scale(1.5);opacity:0}100%{transform:scale(1.5);opacity:0}}
 @keyframes ifx-dash{to{stroke-dashoffset:-28}}

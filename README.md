@@ -189,6 +189,22 @@ maxRemoteRequests: 1
 
 超时、忙、未开启执行、执行失败，都会回一条明确的 `answer`，不会让请求永远挂着。远程执行不绕过本机权限：危险操作仍受执行方的 permission/sandbox 约束；需要审批的工具调用可能因此超时。
 
+### 多目标任务
+
+「节点」页的「多目标任务」卡片可以勾选多台设备（或「所有已知节点」），把同一段任务发给每台设备，并按设备汇总状态和回答。
+
+智能体工具：
+
+```text
+interflow_run  targets: ["android","watch"]  subject: "检查"  body: "报告当前目录"
+interflow_run  targets: ["*"]                subject: "检查"  body: "报告当前目录"
+interflow_tasks
+```
+
+每个目标的状态是 `waiting / answered / timeout / error`，任务整体是 `running / done / partial / failed`。答案异步回来，不会阻塞发送。
+
+当前这版是 P0 编排：每个目标一个请求，没有重试/取消/文件附件；真正的文件/工作区数据要接 Syncthing/Git 或后续的分块传输。
+
 ---
 
 ## 配置
@@ -251,6 +267,8 @@ maxRemoteRequests: 1
 | --- | --- |
 | `interflow_send` | 发消息；`to` 可以是实例名/id/URL，或 `*` 广播 |
 | `interflow_request` | 请一个实例执行任务并回传结果；必须指定单个目标 |
+| `interflow_run` | 同一任务发给多个目标；`targets: ["*"]` 表示所有已知节点 |
+| `interflow_tasks` | 查看多目标任务及每个目标的回答状态 |
 | `interflow_inbox` | 读收件箱；可只读未读、按来源过滤、用 id 读全文 |
 | `interflow_peers` | 查看本机角色、传输、地址、发现的节点和在线状态 |
 | `interflow_connect` | 对等模式下按 URL 添加/移除节点 |
