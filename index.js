@@ -137,6 +137,7 @@ function normalizeConfig(raw) {
       ? Math.min(input.maxEvents, 5000)
       : 800,
     executeRequests: input.executeRequests === true,
+    requireApproval: input.requireApproval === true,
     allowedRequesters: Array.isArray(input.allowedRequesters)
       ? input.allowedRequesters
         .filter((value) => typeof value === 'string' && value.trim())
@@ -339,6 +340,8 @@ function createEngine(ctx, rawConfig) {
   let localSkills = [];
   /** Multi-target tasks created from this instance. */
   let tasks = [];
+  /** Requests waiting for the local operator's approval. */
+  let pendingApprovals = [];
   let mqttStatus = 'idle';
   let mqttError = '';
   /** @type {{start:Function,stop:Function,publish:Function,getMembers:Function,getStatus:Function}|null} */
@@ -444,6 +447,16 @@ function createEngine(ctx, rawConfig) {
         transportOverride = state.transportOverride;
       }
       if (typeof state.mainNode === 'boolean') config.mainNode = state.mainNode;
+      if (typeof state.requireApproval === 'boolean') config.requireApproval = state.requireApproval;
+      if (Array.isArray(state.pendingApprovals)) {
+        pendingApprovals = state.pendingApprovals
+          .filter((entry) => entry && entry.request && typeof entry.request.id === 'string' && entry.request.id)
+          .map((entry) => ({
+            request: entry.request,
+            receivedAt: typeof entry.receivedAt === 'string' ? entry.receivedAt : nowIso(),
+          }))
+          .slice(-20);
+      }
       if (Array.isArray(state.tasks)) {
         tasks = state.tasks
           .filter((raw) => raw && typeof raw.id === 'string' && raw.id && Array.isArray(raw.targets))
@@ -594,6 +607,7 @@ function createEngine(ctx, rawConfig) {
       nodeId,
       nodeName,
       mainNode: config.mainNode === true,
+      requireApproval: config.requireApproval === true,
       seq,
       firstSeq,
       peers: peers.map((peer) => ({
@@ -635,6 +649,7 @@ function createEngine(ctx, rawConfig) {
           updatedAt: target.updatedAt,
         })),
       })),
+      pendingApprovals: pendingApprovals.slice(-20),
       transportOverride,
     };
     const temporary = `${stateFile}.tmp`;
@@ -1552,17 +1567,17 @@ function createEngine(ctx, rawConfig) {
    * @param {object} request - Stored request event.
    * @returns {Promise<void>} Resolves after the answer (or failure) is stored.
    */
-  async function runRequest(request) {
-    if (!request || !request.id || handledRequests.has(request.id)) return;
-    handledRequests.add(request.id);
-    if (handledRequests.size > 800) {
-      handledRequests = new Set([...handledRequests].slice(-500));
-    }
-    schedulePersist();
-
+  /**
+   * Why one incoming request cannot run, or null when it may run.
+   * @param {object} request - Stored request.
+   * @returns {{message:string, subject:string}|null} Refusal reason.
+   */
+  function rejectionReason(request) {
     if (!config.executeRequests) {
-      replyToRequest(request, 'Remote execution is disabled on this device. Set executeRequests: true to let it run requests.', 'Request declined');
-      return;
+      return {
+        message: 'Remote execution is disabled on this device. Set executeRequests: true to let it run requests.',
+        subject: 'Request declined',
+      };
     }
     if (config.allowedRequesters.length > 0) {
       const name = String(request.originName || '').toLowerCase();
@@ -1570,10 +1585,101 @@ function createEngine(ctx, rawConfig) {
         || candidate === request.origin
         || candidate.toLowerCase() === name);
       if (!allowed) {
-        replyToRequest(request, 'This device does not accept requests from that sender.', 'Request refused');
-        return;
+        return {
+          message: 'This device does not accept requests from that sender.',
+          subject: 'Request refused',
+        };
       }
     }
+    return null;
+  }
+
+  /** @returns {object[]} Requests waiting for local approval. */
+  function approvalsView() {
+    return pendingApprovals.map((entry) => ({
+      id: entry.request.id,
+      from: entry.request.originName || entry.request.origin,
+      subject: entry.request.subject,
+      body: entry.request.body,
+      receivedAt: entry.receivedAt,
+    }));
+  }
+
+  /**
+   * Queue or run one incoming request according to the approval policy.
+   * @param {object} request - Stored request event.
+   * @returns {Promise<void>} Resolves after queueing or execution.
+   */
+  async function runRequest(request) {
+    if (!request || !request.id) return;
+    if (handledRequests.has(request.id)) return;
+    if (pendingApprovals.some((entry) => entry.request.id === request.id)) return;
+    const refusal = rejectionReason(request);
+    if (refusal) {
+      handledRequests.add(request.id);
+      replyToRequest(request, refusal.message, refusal.subject);
+      schedulePersist();
+      return;
+    }
+    if (config.requireApproval) {
+      pendingApprovals.push({ request, receivedAt: nowIso() });
+      schedulePersist();
+      return;
+    }
+    await executeRequest(request);
+  }
+
+  /**
+   * Approve one pending request and start execution in the background.
+   * @param {{id?:string}} input - Approval id.
+   * @returns {{approved:boolean,id:string}} Approval result.
+   */
+  async function approveRequest(input) {
+    const id = clampText(input && input.id, 120);
+    const entry = pendingApprovals.find((candidate) => candidate.request.id === id);
+    if (!entry) throw new InterflowError('approval_not_found', 'No pending request matches that id.');
+    pendingApprovals = pendingApprovals.filter((candidate) => candidate.request.id !== id);
+    const refusal = rejectionReason(entry.request);
+    if (refusal) {
+      handledRequests.add(entry.request.id);
+      replyToRequest(entry.request, refusal.message, refusal.subject);
+      schedulePersist();
+      return { approved: false, id };
+    }
+    schedulePersist();
+    executeRequest(entry.request).catch((error) => warn(error));
+    return { approved: true, id };
+  }
+
+  /**
+   * Deny one pending request and answer the sender.
+   * @param {{id?:string}} input - Approval id.
+   * @returns {{denied:boolean,id:string}} Denial result.
+   */
+  function denyRequest(input) {
+    const id = clampText(input && input.id, 120);
+    const entry = pendingApprovals.find((candidate) => candidate.request.id === id);
+    if (!entry) throw new InterflowError('approval_not_found', 'No pending request matches that id.');
+    pendingApprovals = pendingApprovals.filter((candidate) => candidate.request.id !== id);
+    handledRequests.add(entry.request.id);
+    replyToRequest(entry.request, 'The target operator denied this request.', 'Request denied');
+    schedulePersist();
+    return { denied: true, id };
+  }
+
+  /**
+   * Execute one approved/incoming request and answer through the mailbox.
+   * @param {object} request - Stored request event.
+   * @returns {Promise<void>} Resolves after the answer (or failure) is stored.
+   */
+  async function executeRequest(request) {
+    if (!request || !request.id || handledRequests.has(request.id)) return;
+    handledRequests.add(request.id);
+    if (handledRequests.size > 800) {
+      handledRequests = new Set([...handledRequests].slice(-500));
+    }
+    schedulePersist();
+
     if (activeRequests.size >= config.maxRemoteRequests) {
       replyToRequest(request, 'This device is busy with another request. Try again later.', 'Request busy');
       return;
@@ -2072,6 +2178,7 @@ function createEngine(ctx, rawConfig) {
       listen: { ...listenState },
       peers: deviceViews(),
       tasks: tasksView(),
+      approvals: approvalsView(),
       messages: page.map((record) => messageView(record, urls)),
       unread: unreadCount(),
       firstSeq,
@@ -2083,6 +2190,7 @@ function createEngine(ctx, rawConfig) {
       settings: {
         role: effectiveTransport() === 'mqtt' ? 'mqtt' : config.role,
         mainNode: config.mainNode === true,
+        requireApproval: config.requireApproval === true,
         skills: localSkills,
         transport: effectiveTransport(),
         hubUrl: config.hubUrl,
@@ -2236,6 +2344,7 @@ function createEngine(ctx, rawConfig) {
     const nextName = clampText(input && input.nodeName, 80);
     if (nextName) nodeName = nextName;
     if (typeof (input && input.mainNode) === 'boolean') config.mainNode = input.mainNode;
+    if (typeof (input && input.requireApproval) === 'boolean') config.requireApproval = input.requireApproval;
     const previousOverride = transportOverride && transportOverride.transport === 'mqtt' ? transportOverride : null;
     if (mode === 'http') {
       transportOverride = { transport: 'http' };
@@ -2332,6 +2441,9 @@ function createEngine(ctx, rawConfig) {
     retryTask,
     cancelTask,
     tasksView,
+    approveRequest,
+    denyRequest,
+    approvalsView,
     configureTransport,
     addPeer,
     removePeer,
@@ -2830,6 +2942,10 @@ async function handlePanelRequest(request, engine) {
         return Response.json({ ok: true, value: await engine.retryTask(payload) });
       case 'cancel':
         return Response.json({ ok: true, value: engine.cancelTask(payload) });
+      case 'approve':
+        return Response.json({ ok: true, value: await engine.approveRequest(payload) });
+      case 'deny':
+        return Response.json({ ok: true, value: engine.denyRequest(payload) });
       case 'addPeer':
         return Response.json({ ok: true, value: await engine.addPeer(payload) });
       case 'removePeer':

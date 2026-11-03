@@ -92,6 +92,7 @@ apply(ctx, {
   listenHost: '127.0.0.1',
   listenPort: 47990,
   pollMs: 500,
+  executeRequests: true,
   peers: [],
 });
 
@@ -131,6 +132,33 @@ const callPanel = async (op, payload) => {
 };
 console.log('panel route registered:', panelRoute !== undefined);
 console.log('panel snapshot ok:', (await callPanel('snapshot', {})).ok);
+await callPanel('configureTransport', { transport: 'http', requireApproval: true });
+const approvalSelf = await call('interflow_peers');
+await fetch('http://127.0.0.1:47990/ingest', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({
+    events: [{
+      id: 'approval-request-1',
+      ts: new Date().toISOString(),
+      origin: 'peer-node',
+      originName: 'Fake Peer',
+      to: approvalSelf.self.id,
+      kind: 'request',
+      subject: 'approval test',
+      body: 'run this',
+      replyTo: null,
+    }],
+  }),
+});
+await wait(300);
+const pending = await callPanel('snapshot', {});
+console.log('approval pending:', pending.value.approvals && pending.value.approvals.length);
+const approved = await callPanel('approve', { id: 'approval-request-1' });
+console.log('approval approve:', approved.ok, approved.value && approved.value.approved);
+await wait(300);
+const afterApproval = await callPanel('snapshot', {});
+console.log('approval cleared:', afterApproval.value.approvals && afterApproval.value.approvals.length);
 const panelPeers = await callPanel('addPeer', { url: 'http://127.0.0.1:47991', label: 'panel-fake' });
 console.log('panel addPeer ok:', panelPeers.ok, 'added:', panelPeers.value && panelPeers.value.added);
 const panelSend = await callPanel('send', { to: 'panel-fake', subject: 'panel', body: 'from panel route' });

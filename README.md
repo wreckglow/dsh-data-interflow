@@ -189,6 +189,22 @@ maxRemoteRequests: 1
 
 超时、忙、未开启执行、执行失败，都会回一条明确的 `answer`，不会让请求永远挂着。远程执行不绕过本机权限：危险操作仍受执行方的 permission/sandbox 约束；需要审批的工具调用可能因此超时。
 
+### 执行审批
+
+目标设备可以要求人工审批：
+
+```yaml
+executeRequests: true
+requireApproval: true
+```
+
+也可以直接在「MQTT 中继」卡片勾选「执行前需要审批」。收到请求后不会自动运行，而是在「节点」页出现「待审批请求」；点「批准」才开始执行，点「拒绝」会回一条明确的 answer。
+
+- 审批队列会持久化，重载后还在。
+- `executeRequests: false` 时请求在进入审批前就会被拒绝。
+- 审批是目标设备本地的决定，发起方无法绕过。
+- 目前还没有每设备身份/scope；审批和共享 token 是两层不同的东西。
+
 ### 多目标任务
 
 「节点」页的「多目标任务」卡片可以勾选多台设备（或「所有已知节点」），把同一段任务发给每台设备，并按设备汇总状态和回答。
@@ -254,6 +270,7 @@ interflow_tasks
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
 | `executeRequests` | `false` | 是否执行收到的请求 |
+| `requireApproval` | `false` | 收到的请求先进入待审批，人工批准后才执行 |
 | `allowedRequesters` | `[]` | 允许发起请求的 nodeName/nodeId；空 = 任何已鉴权实例 |
 | `remoteCwd` | `''` | 请求会话的工作目录 |
 | `requestTimeoutMs` | `120000` | 单次执行超时（5000–1800000） |

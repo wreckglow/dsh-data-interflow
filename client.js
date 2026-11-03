@@ -136,6 +136,14 @@ window.__ModuleLoader__.load({
       'tasks.retried': '已重试失败/超时目标。',
       'tasks.cancelled': '任务已取消等待。',
       'tasks.cancelledTarget': '已取消',
+      'approval.title': '待审批请求',
+      'approval.count': '{count} 条',
+      'approval.approve': '批准',
+      'approval.deny': '拒绝',
+      'approval.approved': '已批准，正在执行。',
+      'approval.denied': '已拒绝。',
+      'approval.toggle': '执行前需要审批',
+      'approval.toggleHint': '收到的执行请求会先进入待审批，不会自动运行。',
       'peers.mqttConnected': 'MQTT 已连接',
       'peers.mqttConnecting': 'MQTT 连接中',
       'peers.mqttError': 'MQTT 连接异常',
@@ -317,6 +325,14 @@ window.__ModuleLoader__.load({
       'tasks.retried': 'Retried failed or timed-out targets.',
       'tasks.cancelled': 'Task cancelled locally.',
       'tasks.cancelledTarget': 'cancelled',
+      'approval.title': 'Pending approvals',
+      'approval.count': '{count} pending',
+      'approval.approve': 'Approve',
+      'approval.deny': 'Deny',
+      'approval.approved': 'Approved; running now.',
+      'approval.denied': 'Denied.',
+      'approval.toggle': 'Require approval before execution',
+      'approval.toggleHint': 'Incoming requests wait for approval here instead of running automatically.',
       'peers.mqttConnected': 'MQTT connected',
       'peers.mqttConnecting': 'MQTT connecting',
       'peers.mqttError': 'MQTT error',
@@ -825,6 +841,18 @@ window.__ModuleLoader__.load({
         report(t('tasks.cancelled'));
       });
 
+      const approve = (id) => run('approve', async () => {
+        await rpc('approve', { id });
+        await refresh();
+        report(t('approval.approved'));
+      });
+
+      const deny = (id) => run('deny', async () => {
+        await rpc('deny', { id });
+        await refresh();
+        report(t('approval.denied'));
+      });
+
       const copyAddress = async () => {
         const settings = snapshot.settings || {};
         const url = settings.transport === 'mqtt'
@@ -960,6 +988,8 @@ window.__ModuleLoader__.load({
                   onRun: (input) => runTask(input),
                   onRetry: (id) => retryTask(id),
                   onCancel: (id) => cancelTask(id),
+                  onApprove: (id) => approve(id),
+                  onDeny: (id) => deny(id),
                 }),
             ),
           ),
@@ -1434,7 +1464,7 @@ window.__ModuleLoader__.load({
      * @param {object} props - Snapshot and actions.
      * @returns {object} React element.
      */
-    function PeersPanel({ t, snapshot, busy, onAdd, onRemove, onConfigure, onDelegate, onRun, onRetry, onCancel }) {
+    function PeersPanel({ t, snapshot, busy, onAdd, onRemove, onConfigure, onDelegate, onRun, onRetry, onCancel, onApprove, onDeny }) {
       const [url, setUrl] = React.useState('');
       const [label, setLabel] = React.useState('');
       const [token, setToken] = React.useState('');
@@ -1474,6 +1504,7 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'ifx-stack' },
         h(MqttCard, { t, snapshot, busy, onConfigure }),
         h(SkillsCard, { t, snapshot, onDelegate }),
+        h(ApprovalsCard, { t, snapshot, busy: busy === 'approve' || busy === 'deny', onApprove, onDeny }),
         h(TasksCard, { t, snapshot, busy: busy === 'run' || busy === 'retry' || busy === 'cancel', onRun, onRetry, onCancel }),
         role === 'spoke' || transport === 'mqtt'
           ? null
@@ -1552,6 +1583,7 @@ window.__ModuleLoader__.load({
       const [room, setRoom] = React.useState(settings.mqttTopic || '');
       const [nodeName, setNodeName] = React.useState(settings.nodeName || '');
       const [mainNode, setMainNode] = React.useState(settings.mainNode === true);
+      const [requireApproval, setRequireApproval] = React.useState(settings.requireApproval === true);
       const [secret, setSecret] = React.useState('');
       const [username, setUsername] = React.useState('');
       const [password, setPassword] = React.useState('');
@@ -1568,6 +1600,7 @@ window.__ModuleLoader__.load({
             transport: 'mqtt',
             nodeName: nodeName.trim(),
             mainNode,
+            requireApproval,
             mqttUrl: url.trim(),
             mqttTopic: room.trim(),
             mqttSecret: secret,
@@ -1585,7 +1618,7 @@ window.__ModuleLoader__.load({
         if (working) return;
         setSaving(true);
         try {
-          await onConfigure({ transport: 'http', nodeName: nodeName.trim(), mainNode });
+          await onConfigure({ transport: 'http', nodeName: nodeName.trim(), mainNode, requireApproval });
         } catch {
           // The page banner already shows the failure.
         } finally {
@@ -1626,6 +1659,15 @@ window.__ModuleLoader__.load({
           h('span', null, t('skills.mainToggle')),
         ),
         h('div', { className: 'ifx-hint' }, t('skills.mainToggleHint')),
+        h('label', { className: 'ifx-check' },
+          h('input', {
+            type: 'checkbox',
+            checked: requireApproval,
+            onChange: (event) => setRequireApproval(event.target.checked),
+          }),
+          h('span', null, t('approval.toggle')),
+        ),
+        h('div', { className: 'ifx-hint' }, t('approval.toggleHint')),
         h('div', { className: 'ifx-field-row ifx-top-gap' },
           h('label', { className: 'ifx-field' },
             h('span', { className: 'ifx-label' }, t('mqtt.broker')),
@@ -1748,6 +1790,37 @@ window.__ModuleLoader__.load({
           )))
           : null,
         h('div', { className: 'ifx-hint ifx-top-gap-sm' }, local ? t('skills.localHint') : t('skills.remoteHint')),
+      );
+    }
+
+    /**
+     * Requests waiting for the local operator to approve or deny.
+     * @param {object} props - Snapshot and approval actions.
+     * @returns {object|null} React element.
+     */
+    function ApprovalsCard({ t, snapshot, busy, onApprove, onDeny }) {
+      const approvals = snapshot.approvals || [];
+      if (approvals.length === 0) return null;
+      return h('section', { className: 'ifx-card' },
+        h('div', { className: 'ifx-card-head' },
+          h('h2', { className: 'ifx-card-title' }, t('approval.title')),
+          h('span', { className: 'ifx-card-note' }, t('approval.count', { count: approvals.length })),
+        ),
+        h('div', { className: 'ifx-stack ifx-top-gap' }, approvals.map((entry) => h('article', {
+          key: entry.id,
+          className: 'ifx-peer-card',
+        },
+        h('div', { className: 'ifx-peer-top' },
+          h('span', { className: 'ifx-peer-name' }, entry.from || entry.id),
+          h('span', { className: 'ifx-peer-state' }, new Date(entry.receivedAt).toLocaleTimeString()),
+        ),
+        h('div', { className: 'ifx-peer-meta' }, entry.subject),
+        h('div', { className: 'ifx-peer-meta' }, entry.body.slice(0, 800)),
+        h('div', { className: 'ifx-compose-foot' },
+          h('button', { className: 'ifx-btn ghost', disabled: busy, onClick: () => onDeny(entry.id) }, t('approval.deny')),
+          h('button', { className: 'ifx-btn primary', disabled: busy, onClick: () => onApprove(entry.id) }, t('approval.approve')),
+        ),
+        ))),
       );
     }
 
