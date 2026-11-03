@@ -56,6 +56,7 @@ Use this skill when the user wants to contact, notify, ask, or control another D
 - \`interflow_peers\`: resolve device names, ids, roles, online state, and the main node's skills. Call this before targeting anything.
 - \`interflow_send\`: send a text message to one device or \`*\` for every peer. Kinds: note, alert, question, answer, handoff, request.
 - \`interflow_request\`: send one task to one device. The target runs it in its own agent session and answers. It may be refused, require approval, or time out.
+- \`interflow_ask\`: send one task to one device and wait for the answer in the same turn. Use this for a question or a quick task in chat.
 - \`interflow_run\`: send the same task to several devices. \`targets: ["*\"]\` means every known node. Returns a task id; answers arrive asynchronously.
 - \`interflow_tasks\`: inspect recent multi-target tasks and each target's answer.
 - \`interflow_retry\` / \`interflow_cancel\`: retry failed targets or stop waiting locally.
@@ -64,7 +65,7 @@ Use this skill when the user wants to contact, notify, ask, or control another D
 ## Rules
 
 1. Resolve names with \`interflow_peers\`; never invent a device name.
-2. Use \`interflow_send\` for a note or question, \`interflow_request\` for one device task, and \`interflow_run\` for several devices.
+2. Use \`interflow_send\` for a note or question, \`interflow_ask\` when the user wants a reply now, \`interflow_request\` for a one-off task, and \`interflow_run\` for several devices.
 3. The target executes with its own tools, permissions, and sandbox. It may require local approval; if it is refused or times out, report the reason instead of retrying blindly.
 4. Do not use Interflow for work that only touches this machine.
 5. When the user asks "check messages", call \`interflow_inbox\`.
@@ -391,6 +392,8 @@ function createEngine(ctx, rawConfig) {
   let tasks = [];
   /** Requests waiting for the local operator's approval. */
   let pendingApprovals = [];
+  /** Blocking chat asks waiting for a correlated answer. */
+  const pendingAsks = new Map();
   let mqttStatus = 'idle';
   let mqttError = '';
   /** @type {{start:Function,stop:Function,publish:Function,getMembers:Function,getStatus:Function}|null} */
@@ -1149,6 +1152,7 @@ function createEngine(ctx, rawConfig) {
     trimEvents();
     appendLine(record);
     schedulePersist();
+    resolveAsk(event);
     trackTaskAnswer(event);
     if (event.kind === 'request' && event.to !== '*' && isForMe(event)) {
       queueMicrotask(() => {
@@ -1327,6 +1331,23 @@ function createEngine(ctx, rawConfig) {
     if (typeof task.timer.unref === 'function') task.timer.unref();
   }
 
+  /**
+   * Resolve one blocking chat ask when its answer arrives.
+   * @param {object} event - Incoming answer event.
+   */
+  function resolveAsk(event) {
+    if (!event || !event.replyTo) return;
+    const pending = pendingAsks.get(event.replyTo);
+    if (!pending) return;
+    pendingAsks.delete(event.replyTo);
+    clearTimeout(pending.timer);
+    pending.resolve({
+      requestId: event.replyTo,
+      answer: event.body,
+      subject: event.subject,
+      from: event.originName || event.origin,
+    });
+  }
   /**
    * Update a task when an answer correlated by `replyTo` arrives.
    * @param {object} event - Incoming event.
@@ -1609,6 +1630,35 @@ function createEngine(ctx, rawConfig) {
       throw new InterflowError('request_target_required', 'A request needs one target device.');
     }
     return sendMessage({ ...input, to, kind: 'request' });
+  }
+
+  /**
+   * Send one task and wait for its correlated answer, for chat-style Q&A.
+   * @param {{to?:string, subject?:string, body?:string, timeoutMs?:number}} input - Ask fields.
+   * @returns {Promise<object>} Answer plus request metadata.
+   */
+  async function askRemote(input) {
+    const to = clampText(input && input.to, 500);
+    if (!to || to === '*') {
+      throw new InterflowError('ask_target_required', 'A chat ask needs one target device.');
+    }
+    const body = clampText(input && input.body, MAX_MESSAGE_BODY);
+    if (!body) throw new InterflowError('empty_ask', 'An ask needs a body.');
+    const timeoutMs = clampInt(input && input.timeoutMs, 5000, 300000, Math.min(300000, config.requestTimeoutMs + 5000));
+    const sent = await sendMessage({
+      to,
+      kind: 'request',
+      subject: clampText(input && input.subject, MAX_SUBJECT) || '(question)',
+      body,
+    });
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pendingAsks.delete(sent.id);
+        reject(new InterflowError('ask_timeout', `No answer from ${sent.toLabel} within ${Math.round(timeoutMs / 1000)}s.`));
+      }, timeoutMs);
+      if (typeof timer.unref === 'function') timer.unref();
+      pendingAsks.set(sent.id, { resolve, reject, timer });
+    }).then((result) => ({ ...sent, ...result }));
   }
 
   /**
@@ -2490,6 +2540,7 @@ function createEngine(ctx, rawConfig) {
     retryTask,
     cancelTask,
     tasksView,
+    askRemote,
     approveRequest,
     denyRequest,
     approvalsView,
@@ -2754,6 +2805,21 @@ const RUN_OUTPUT_SCHEMA = {
   },
 };
 
+const ASK_OUTPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    ok: { type: 'boolean' },
+    requestId: { type: 'string' },
+    to: { type: 'string' },
+    toLabel: { type: 'string' },
+    from: { type: 'string' },
+    subject: { type: 'string' },
+    answer: { type: 'string' },
+    ...ERROR_PROPERTIES,
+  },
+};
+
 const TASKS_OUTPUT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -2818,6 +2884,17 @@ const PARAMETER_SCHEMAS = {
         items: { type: 'string' },
         description: 'Optional subset of labels/ids to retry; omitted retries every failed, timed-out, or cancelled target.',
       },
+    },
+  },
+  ask: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['to', 'body'],
+    properties: {
+      to: { type: 'string', description: 'One target device: label, node name, node id, or URL.' },
+      subject: { type: 'string', description: 'Short subject, at most 200 characters.' },
+      body: { type: 'string', description: 'Question or task text, at most 16000 characters.' },
+      timeoutMs: { type: 'number', description: 'Wait budget in milliseconds, 5000-300000; defaults to requestTimeoutMs + 5000.' },
     },
   },
   cancel: {
@@ -2910,6 +2987,13 @@ function registerTools(ctx, engine) {
     parameters: PARAMETER_SCHEMAS.run,
     output: { schema: RUN_OUTPUT_SCHEMA, render: renderJson },
     execute: (args) => runTool(async (input) => ({ task: await engine.runTask(input) }), args),
+  });
+  ctx.tools.register({
+    name: 'interflow_ask',
+    description: 'Send one task to one DSH instance and wait for its answer in the same chat turn. Use this for a question or a single quick task; use interflow_run for several targets.',
+    parameters: PARAMETER_SCHEMAS.ask,
+    output: { schema: ASK_OUTPUT_SCHEMA, render: renderJson },
+    execute: (args) => runTool((input) => engine.askRemote(input), args),
   });
   ctx.tools.register({
     name: 'interflow_tasks',
