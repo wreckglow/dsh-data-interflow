@@ -399,6 +399,9 @@ function createEngine(ctx, rawConfig) {
     }
     if (state && typeof state === 'object' && !Array.isArray(state)) {
       nodeId = typeof state.nodeId === 'string' && state.nodeId ? state.nodeId : null;
+      if (typeof state.nodeName === 'string' && state.nodeName.trim()) {
+        nodeName = clampText(state.nodeName, 80);
+      }
       if (Number.isInteger(state.seq) && state.seq >= 0) seq = state.seq;
       if (Number.isInteger(state.firstSeq) && state.firstSeq >= 1) firstSeq = state.firstSeq;
       if (Array.isArray(state.peers)) {
@@ -1773,6 +1776,7 @@ function createEngine(ctx, rawConfig) {
         hubName: hubInfo && hubInfo.name ? hubInfo.name : '',
         mqttUrl: mqttSettings().url,
         mqttTopic: mqttSettings().topic,
+        nodeName,
         mqttStatus,
         mqttError,
         mqttSecretConfigured: Boolean(mqttSettings().secret),
@@ -1850,6 +1854,8 @@ function createEngine(ctx, rawConfig) {
    */
   async function configureTransport(input) {
     const mode = input && input.transport === 'mqtt' ? 'mqtt' : 'http';
+    const nextName = clampText(input && input.nodeName, 80);
+    if (nextName) nodeName = nextName;
     const previousOverride = transportOverride && transportOverride.transport === 'mqtt' ? transportOverride : null;
     if (mode === 'http') {
       transportOverride = { transport: 'http' };
@@ -2001,6 +2007,7 @@ function createEngine(ctx, rawConfig) {
         hubUrl: config.hubUrl,
         mqttUrl: mqttSettings().url,
         mqttTopic: mqttSettings().topic,
+        nodeName,
         mqttStatus,
         url: listenState.url || '',
         listening: listenState.enabled,

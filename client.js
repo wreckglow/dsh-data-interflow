@@ -105,6 +105,8 @@ window.__ModuleLoader__.load({
       'peers.mqttBroker': 'MQTT Broker',
       'peers.mqttRoom': 'MQTT 房间',
       'mqtt.title': 'MQTT 中继（跨网络）',
+      'mqtt.nodeName': '节点名称',
+      'mqtt.nodeNameHint': '建议唯一，例如 android / watch / home-server；发送和执行请求时用它选目标。',
       'mqtt.hint': '三台设备连同一个免费 broker，不需要公网 IP；消息端到端加密。三台要填同一个房间名和密钥。',
       'mqtt.broker': 'Broker 地址',
       'mqtt.room': '房间名（三台一致）',
@@ -247,6 +249,8 @@ window.__ModuleLoader__.load({
       'peers.mqttBroker': 'MQTT broker',
       'peers.mqttRoom': 'MQTT room',
       'mqtt.title': 'MQTT relay (cross-network)',
+      'mqtt.nodeName': 'Node name',
+      'mqtt.nodeNameHint': 'Keep it unique, e.g. android / watch / home-server; it is the target name for messages and requests.',
       'mqtt.hint': 'All devices use one free broker; no public IP needed. Payloads are end-to-end encrypted. Use the same room and secret everywhere.',
       'mqtt.broker': 'Broker URL',
       'mqtt.room': 'Room (same on every device)',
@@ -1431,6 +1435,7 @@ window.__ModuleLoader__.load({
       const active = settings.transport === 'mqtt';
       const [url, setUrl] = React.useState(settings.mqttUrl || 'wss://broker.emqx.io:8084/mqtt');
       const [room, setRoom] = React.useState(settings.mqttTopic || '');
+      const [nodeName, setNodeName] = React.useState(settings.nodeName || '');
       const [secret, setSecret] = React.useState('');
       const [username, setUsername] = React.useState('');
       const [password, setPassword] = React.useState('');
@@ -1439,12 +1444,13 @@ window.__ModuleLoader__.load({
       const needsSecret = !settings.mqttSecretConfigured;
 
       const save = async () => {
-        if (working || !url.trim() || !room.trim()) return;
+        if (working || !url.trim() || !room.trim() || !nodeName.trim()) return;
         if (needsSecret && !secret.trim()) return;
         setSaving(true);
         try {
           await onConfigure({
             transport: 'mqtt',
+            nodeName: nodeName.trim(),
             mqttUrl: url.trim(),
             mqttTopic: room.trim(),
             mqttSecret: secret,
@@ -1462,7 +1468,7 @@ window.__ModuleLoader__.load({
         if (working) return;
         setSaving(true);
         try {
-          await onConfigure({ transport: 'http' });
+          await onConfigure({ transport: 'http', nodeName: nodeName.trim() });
         } catch {
           // The page banner already shows the failure.
         } finally {
@@ -1484,6 +1490,16 @@ window.__ModuleLoader__.load({
           h('span', { className: 'ifx-card-note' }, statusText),
         ),
         h('p', { className: 'ifx-hint' }, t('mqtt.hint')),
+        h('label', { className: 'ifx-field ifx-block' },
+          h('span', { className: 'ifx-label' }, t('mqtt.nodeName')),
+          h('input', {
+            className: 'ifx-input',
+            value: nodeName,
+            placeholder: 'android',
+            onChange: (event) => setNodeName(event.target.value),
+          }),
+          h('span', { className: 'ifx-hint' }, t('mqtt.nodeNameHint')),
+        ),
         h('div', { className: 'ifx-field-row ifx-top-gap' },
           h('label', { className: 'ifx-field' },
             h('span', { className: 'ifx-label' }, t('mqtt.broker')),
@@ -1543,7 +1559,7 @@ window.__ModuleLoader__.load({
             : h('span', { className: 'ifx-hint' }, settings.mqttSecretConfigured ? t('mqtt.secretSet') : ''),
           h('button', {
             className: 'ifx-btn primary',
-            disabled: working || !url.trim() || !room.trim() || (needsSecret && !secret.trim()),
+            disabled: working || !url.trim() || !room.trim() || !nodeName.trim() || (needsSecret && !secret.trim()),
             onClick: save,
           }, working ? t('mqtt.saving') : active ? t('mqtt.save') : t('mqtt.enable')),
         ),
