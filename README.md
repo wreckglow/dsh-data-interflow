@@ -278,6 +278,20 @@ interflow_tasks
 
 ---
 
+## 在聊天里直接用
+
+插件在 Host 注册了工具和一个 `interflow` skill，新建会话后不需要打开面板，直接对智能体说：
+
+- “看看互通里现在有哪些节点、谁在线。”
+- “给 android 发一条消息：构建完成了。”
+- “让所有在线节点报告当前目录，把结果汇总给我。”
+- “看看互通收件箱里有没有新消息。”
+- “让主节点用 agent-experience 技能处理这个任务。”
+
+智能体会自己调用 `interflow_peers`、`interflow_send`、`interflow_request`、`interflow_run`、`interflow_tasks`、`interflow_inbox` 等工具。已有会话如果还没有这个 skill，开一个新会话或刷新页面。
+
+面板仍然保留，用来配置传输、看拓扑、审批请求和任务结果；日常使用可以完全在聊天里完成。
+
 ## 智能体工具
 
 | 工具 | 用途 |

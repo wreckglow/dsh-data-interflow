@@ -47,6 +47,54 @@ class InterflowError extends Error {
 /** Tools are always visible when the plugin is active. */
 export const inject = ['tools'];
 
+const INTERFLOW_SKILL_CONTENT = `# Interflow
+
+Use this skill when the user wants to contact, notify, ask, or control another DSH instance, or check messages from another instance.
+
+## Tools
+
+- \`interflow_peers\`: resolve device names, ids, roles, online state, and the main node's skills. Call this before targeting anything.
+- \`interflow_send\`: send a text message to one device or \`*\` for every peer. Kinds: note, alert, question, answer, handoff, request.
+- \`interflow_request\`: send one task to one device. The target runs it in its own agent session and answers. It may be refused, require approval, or time out.
+- \`interflow_run\`: send the same task to several devices. \`targets: ["*\"]\` means every known node. Returns a task id; answers arrive asynchronously.
+- \`interflow_tasks\`: inspect recent multi-target tasks and each target's answer.
+- \`interflow_retry\` / \`interflow_cancel\`: retry failed targets or stop waiting locally.
+- \`interflow_inbox\`: read messages received by this instance.
+
+## Rules
+
+1. Resolve names with \`interflow_peers\`; never invent a device name.
+2. Use \`interflow_send\` for a note or question, \`interflow_request\` for one device task, and \`interflow_run\` for several devices.
+3. The target executes with its own tools, permissions, and sandbox. It may require local approval; if it is refused or times out, report the reason instead of retrying blindly.
+4. Do not use Interflow for work that only touches this machine.
+5. When the user asks "check messages", call \`interflow_inbox\`.
+6. When the user asks to use a skill that lives on the main node, send a request that names the skill.
+7. After \`interflow_run\`, poll \`interflow_tasks\` or tell the user the task id; do not claim success before an answer arrives.
+`;
+
+/**
+ * Register the model-facing Interflow skill so new chat sessions know when to
+ * call the tools without opening the plugin panel.
+ * @param {object} ctx - Host plugin context.
+ */
+function registerInterflowSkill(ctx) {
+  ctx.inject(['skills'], (skillsCtx) => {
+    const skills = typeof skillsCtx.get === 'function' ? skillsCtx.get('skills') : skillsCtx.skills;
+    if (!skills || typeof skills.register !== 'function') return;
+    try {
+      skillsCtx.effect(() => skills.register({
+        name: 'interflow',
+        description: 'Contact, notify, ask, or control other DSH instances over Interflow; check their replies.',
+        whenToUse: 'The user wants to message another DSH instance, ask one or many instances to do something, or read messages from another instance.',
+        content: INTERFLOW_SKILL_CONTENT,
+        invocation: { modelInvocable: true, userInvocable: true },
+      }), 'interflow: agent skill');
+    } catch {
+      // The skills service is optional; tools still work without the skill.
+    }
+  });
+}
+
 /**
  * Start the host half: engine, agent tools, and the browser RPC channel.
  * @param {object} ctx - Host plugin context.
@@ -60,6 +108,7 @@ export function apply(ctx, config) {
     return () => engine.stop();
   }, 'interflow: messaging engine');
   registerTools(ctx, engine);
+  registerInterflowSkill(ctx);
   ctx.inject(['connection'], (connectionCtx) => {
     try {
       connectionCtx.effect(() => connectionCtx.connection.fetch.register({
