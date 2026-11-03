@@ -2112,6 +2112,7 @@ const PEERS_OUTPUT_SCHEMA = {
         hubUrl: { type: 'string' },
         mqttUrl: { type: 'string' },
         mqttTopic: { type: 'string' },
+        nodeName: { type: 'string' },
         mqttStatus: { type: 'string' },
         url: { type: 'string' },
         listening: { type: 'boolean' },
