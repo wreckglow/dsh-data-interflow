@@ -105,6 +105,13 @@ function normalizeConfig(raw) {
   return {
     nodeName: clampText(input.nodeName, 80)
       || `${os.hostname()}${profile === 'default' ? '' : ` (${profile})`}`,
+    mainNode: input.mainNode === true,
+    sharedSkills: Array.isArray(input.sharedSkills)
+      ? input.sharedSkills
+        .filter((value) => typeof value === 'string' && value.trim())
+        .map((value) => value.trim())
+        .slice(0, 50)
+      : [],
     role,
     transport,
     hubUrl: hubUrl || '',
@@ -328,6 +335,8 @@ function createEngine(ctx, rawConfig) {
   const activeRequests = new Map();
   /** @type {Array<{id:string,name:string,online:boolean,lastSeen:string}>} */
   let mqttMembers = [];
+  /** Skills this instance can offer to the mesh. */
+  let localSkills = [];
   let mqttStatus = 'idle';
   let mqttError = '';
   /** @type {{start:Function,stop:Function,publish:Function,getMembers:Function,getStatus:Function}|null} */
@@ -415,6 +424,8 @@ function createEngine(ctx, rawConfig) {
             name: clampText(member.name, 80) || member.id.slice(0, 8),
             firstSeen: typeof member.firstSeen === 'string' ? member.firstSeen : nowIso(),
             lastSeen: typeof member.lastSeen === 'string' ? member.lastSeen : nowIso(),
+            mainNode: member.mainNode === true,
+            skills: Array.isArray(member.skills) ? member.skills.filter((name) => typeof name === 'string').slice(0, 32) : [],
           }))
           .slice(-32);
       }
@@ -430,6 +441,7 @@ function createEngine(ctx, rawConfig) {
       if (state.transportOverride && (state.transportOverride.transport === 'mqtt' || state.transportOverride.transport === 'http')) {
         transportOverride = state.transportOverride;
       }
+      if (typeof state.mainNode === 'boolean') config.mainNode = state.mainNode;
     }
     if (!nodeId) nodeId = uuid();
 
@@ -515,6 +527,8 @@ function createEngine(ctx, rawConfig) {
     peer.pushCursor = Number.isInteger(raw.pushCursor) && raw.pushCursor >= 0 ? raw.pushCursor : 0;
     peer.nodeId = typeof raw.nodeId === 'string' ? raw.nodeId : null;
     peer.nodeName = typeof raw.nodeName === 'string' ? raw.nodeName : null;
+    peer.mainNode = raw.mainNode === true;
+    peer.skills = Array.isArray(raw.skills) ? raw.skills.filter((name) => typeof name === 'string').slice(0, 32) : [];
     return peer;
   }
 
@@ -533,6 +547,8 @@ function createEngine(ctx, rawConfig) {
       pushCursor: 0,
       nodeId: null,
       nodeName: null,
+      mainNode: false,
+      skills: [],
       lastSeen: null,
       lastError: null,
       failures: 0,
@@ -546,6 +562,7 @@ function createEngine(ctx, rawConfig) {
       version: 1,
       nodeId,
       nodeName,
+      mainNode: config.mainNode === true,
       seq,
       firstSeq,
       peers: peers.map((peer) => ({
@@ -557,12 +574,16 @@ function createEngine(ctx, rawConfig) {
         pushCursor: peer.pushCursor,
         nodeId: peer.nodeId,
         nodeName: peer.nodeName,
+        mainNode: peer.mainNode === true,
+        skills: Array.isArray(peer.skills) ? peer.skills : [],
       })),
       members: members.map((member) => ({
         id: member.id,
         name: member.name,
         firstSeen: member.firstSeen,
         lastSeen: member.lastSeen,
+        mainNode: member.mainNode === true,
+        skills: Array.isArray(member.skills) ? member.skills : [],
       })),
       removedPeers: [...removedPeers].slice(-100),
       readIds: [...readIds].slice(-2000),
@@ -772,7 +793,7 @@ function createEngine(ctx, rawConfig) {
         ok: true,
         protocol: PROTOCOL,
         version: VERSION,
-        node: { id: nodeId, name: nodeName },
+        node: nodeInfo(),
         time: nowIso(),
       });
       return;
@@ -846,7 +867,7 @@ function createEngine(ctx, rawConfig) {
       protocol: PROTOCOL,
       version: VERSION,
       role: 'hub',
-      node: { id: nodeId, name: nodeName },
+      node: nodeInfo(),
       members: memberViews(),
       firstSeq,
       lastSeq: seq,
@@ -926,7 +947,7 @@ function createEngine(ctx, rawConfig) {
       ok: true,
       protocol: PROTOCOL,
       version: VERSION,
-      node: { id: nodeId, name: nodeName },
+      node: nodeInfo(),
       firstSeq,
       lastSeq: seq,
       reset: since > seq || (since > 0 && since + 1 < firstSeq),
@@ -1165,6 +1186,10 @@ function createEngine(ctx, rawConfig) {
       if (!result || result.ok !== true || !result.node) throw new Error('peer returned an invalid log');
       peer.nodeId = typeof result.node.id === 'string' ? result.node.id : peer.nodeId;
       peer.nodeName = typeof result.node.name === 'string' ? result.node.name : peer.nodeName;
+      peer.mainNode = result.node.mainNode === true;
+      peer.skills = Array.isArray(result.node.skills)
+        ? result.node.skills.filter((name) => typeof name === 'string').slice(0, 32)
+        : [];
       if (peer.mode === 'hub') {
         hubInfo = {
           url: peer.url,
@@ -1586,6 +1611,8 @@ function createEngine(ctx, rawConfig) {
       label: peerLabel(peer),
       nodeName: peer.nodeName || '',
       nodeId: peer.nodeId || '',
+      mainNode: peer.mainNode === true,
+      skills: Array.isArray(peer.skills) ? peer.skills : [],
       online,
       lastSeen: peer.lastSeen || '',
       lastError: peer.lastError || '',
@@ -1684,6 +1711,8 @@ function createEngine(ctx, rawConfig) {
       label: member.name || member.id.slice(0, 8),
       nodeName: member.name || '',
       nodeId: member.id,
+      mainNode: member.mainNode === true,
+      skills: Array.isArray(member.skills) ? member.skills : [],
       online: memberOnline(member),
       lastSeen: member.lastSeen || '',
       lastError: '',
@@ -1704,6 +1733,8 @@ function createEngine(ctx, rawConfig) {
           label: member.name || member.id.slice(0, 8),
           nodeName: member.name || '',
           nodeId: member.id,
+          mainNode: member.mainNode === true,
+          skills: Array.isArray(member.skills) ? member.skills : [],
           online: member.online !== false,
           lastSeen: member.lastSeen || '',
           lastError: '',
@@ -1733,6 +1764,8 @@ function createEngine(ctx, rawConfig) {
           label: member.name || member.id.slice(0, 8),
           nodeName: member.name || '',
           nodeId: member.id,
+          mainNode: member.mainNode === true,
+          skills: Array.isArray(member.skills) ? member.skills : [],
           online: member.online === true,
           lastSeen: member.lastSeen || '',
           lastError: '',
@@ -1758,10 +1791,9 @@ function createEngine(ctx, rawConfig) {
       : events.filter((record) => record.seq > since).slice(0, limit);
     const urls = selfUrls();
     return {
-      self: { id: nodeId, name: nodeName, version: VERSION },
+      self: { id: nodeId, name: nodeName, version: VERSION, mainNode: config.mainNode === true, skills: localSkillNames() },
       listen: { ...listenState },
-      peers: deviceViews(),
-      messages: page.map((record) => messageView(record, urls)),
+      peers: deviceViews(),      messages: page.map((record) => messageView(record, urls)),
       unread: unreadCount(),
       firstSeq,
       lastSeq: seq,
@@ -1771,6 +1803,8 @@ function createEngine(ctx, rawConfig) {
       reset: since !== undefined && since < firstSeq - 1,
       settings: {
         role: effectiveTransport() === 'mqtt' ? 'mqtt' : config.role,
+        mainNode: config.mainNode === true,
+        skills: localSkills,
         transport: effectiveTransport(),
         hubUrl: config.hubUrl,
         hubName: hubInfo && hubInfo.name ? hubInfo.name : '',
@@ -1797,12 +1831,78 @@ function createEngine(ctx, rawConfig) {
 
   // -- lifecycle -----------------------------------------------------------
 
+  /** Load the local skill catalog when the Host exposes a skills service. */
+  async function refreshLocalSkills() {
+    const collected = new Map();
+    const add = (list) => {
+      for (const skill of Array.isArray(list) ? list : []) {
+        if (!skill || typeof skill.name !== 'string' || collected.has(skill.name)) continue;
+        if (skill.invocation && skill.invocation.modelInvocable === false) continue;
+        if (skill.modelInvocable === false) continue;
+        collected.set(skill.name, {
+          name: skill.name,
+          description: typeof skill.description === 'string' ? skill.description : '',
+          whenToUse: typeof skill.whenToUse === 'string' ? skill.whenToUse : '',
+        });
+      }
+    };
+    try {
+      const registry = ctx.get('skills');
+      if (registry && typeof registry.list === 'function') {
+        add(await registry.list({}));
+      }
+    } catch {
+      // The global registry is optional.
+    }
+    try {
+      const catalog = ctx.get('sessionSkillCatalog');
+      const controller = ctx.get('sessionController');
+      if (catalog && typeof catalog.list === 'function' && controller && typeof controller.list === 'function') {
+        const signal = typeof AbortSignal.timeout === 'function'
+          ? AbortSignal.timeout(3000)
+          : new AbortController().signal;
+        const sessions = await controller.list({}, signal);
+        const sessionId = sessions && Array.isArray(sessions.items) && sessions.items[0]
+          ? sessions.items[0].id
+          : '';
+        if (sessionId) {
+          const result = await catalog.list({ sessionId }, signal);
+          add(result && result.skills);
+        }
+      }
+    } catch {
+      // A cold or unavailable session catalog falls back to the global registry.
+    }
+    localSkills = [...collected.values()].slice(0, 50);
+    for (const name of config.sharedSkills) {
+      if (!localSkills.some((skill) => skill.name === name)) {
+        localSkills.push({ name, description: '', whenToUse: '' });
+      }
+    }
+  }
+
+  /** @returns {string[]} Skill names advertised to peers. */
+  function localSkillNames() {
+    return localSkills.map((skill) => skill.name).slice(0, 32);
+  }
+
+  /** @returns {object} Node identity carried by health, log, and presence. */
+  function nodeInfo() {
+    return {
+      id: nodeId,
+      name: nodeName,
+      mainNode: config.mainNode === true,
+      skills: localSkillNames(),
+    };
+  }
+
   /** Load state and start the configured transport. */
   async function start() {
     if (started) return;
     started = true;
     try {
       await loadState();
+      await refreshLocalSkills();
       await startTransport();
       schedulePersist();
     } catch (error) {
@@ -1856,6 +1956,7 @@ function createEngine(ctx, rawConfig) {
     const mode = input && input.transport === 'mqtt' ? 'mqtt' : 'http';
     const nextName = clampText(input && input.nodeName, 80);
     if (nextName) nodeName = nextName;
+    if (typeof (input && input.mainNode) === 'boolean') config.mainNode = input.mainNode;
     const previousOverride = transportOverride && transportOverride.transport === 'mqtt' ? transportOverride : null;
     if (mode === 'http') {
       transportOverride = { transport: 'http' };
@@ -1909,6 +2010,8 @@ function createEngine(ctx, rawConfig) {
       secret: settings.secret,
       nodeId,
       nodeName,
+      mainNode: config.mainNode === true,
+      skills: localSkillNames(),
       presenceIntervalMs: Math.max(15000, config.pollMs * 5),
       onEvent: (event) => {
         ingestRemote(event);
@@ -2003,6 +2106,8 @@ function createEngine(ctx, rawConfig) {
         id: nodeId,
         name: nodeName,
         role: effectiveTransport() === 'mqtt' ? 'mqtt' : config.role,
+        mainNode: config.mainNode === true,
+        skills: localSkillNames(),
         transport: effectiveTransport(),
         hubUrl: config.hubUrl,
         mqttUrl: mqttSettings().url,
@@ -2113,6 +2218,8 @@ const PEERS_OUTPUT_SCHEMA = {
         mqttUrl: { type: 'string' },
         mqttTopic: { type: 'string' },
         nodeName: { type: 'string' },
+        mainNode: { type: 'boolean' },
+        skills: { type: 'array', items: { type: 'string' } },
         mqttStatus: { type: 'string' },
         url: { type: 'string' },
         listening: { type: 'boolean' },
@@ -2129,6 +2236,8 @@ const PEERS_OUTPUT_SCHEMA = {
           url: { type: 'string' },
           nodeName: { type: 'string' },
           nodeId: { type: 'string' },
+          mainNode: { type: 'boolean' },
+          skills: { type: 'array', items: { type: 'string' } },
           kind: { type: 'string' },
           online: { type: 'boolean' },
           lastSeen: { type: 'string' },

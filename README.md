@@ -204,6 +204,8 @@ maxRemoteRequests: 1
 | `role` | `peer`（有 `hubUrl` 时为 `spoke`） | `peer` / `hub` / `spoke`；MQTT 模式忽略 |
 | `transport` | `http` | `http` 或 `mqtt` |
 | `nodeName` | `<主机名> (<profile>)` | 实例显示名，建议唯一 |
+| `mainNode` | `false` | 设为主节点，向其他节点广播技能 |
+| `sharedSkills` | `[]` | 额外广播的技能名；用于补充注册表里看不到的会话/preset 技能 |
 | `token` | `''` | 共享令牌；为空时 HTTP 只接受本机回环节点，MQTT 必须有密钥 |
 | `pollMs` | `2000` | 同步/轮询间隔（毫秒，最小 500） |
 | `maxEvents` | `800` | 本机/信箱保留的消息条数（50–5000） |
@@ -256,6 +258,28 @@ maxRemoteRequests: 1
 工具输出是 JSON，错误带稳定的 `code`，例如 `no_peers`、`unknown_peer`、`request_target_required`、`invalid_mqtt_url`。
 
 ---
+
+## 主节点技能
+
+可以把一个实例设成主节点，把它的技能目录广播给其他节点；其他节点在「节点」页看到「主节点能力」，点「委派」即可让主节点用本地技能执行。
+
+主节点配置：
+
+```yaml
+mainNode: true
+executeRequests: true
+sharedSkills:
+  - agent-experience
+  - cordis-plugin-development
+```
+
+- `mainNode: true` 让 presence/health 带上主节点标记和技能名。
+- 技能目录来自 Host 的技能注册表；会话/preset 作用域的技能如果不在全局注册表里，用 `sharedSkills` 手动列出名字。
+- 其他节点只拿到技能名，不复制技能文件，也不接触主节点的 MCP 或密钥。
+- 委派会发一条 `执行请求` 给主节点；主节点的 agent 用本地技能执行，结果回到消息流。
+- 主节点必须开 `executeRequests: true`，否则会回一条“未开启执行”。
+
+MCP 不参与这套目录；MCP 仍只在主节点本地，通过远程执行间接使用。
 
 ## 安全
 

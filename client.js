@@ -99,6 +99,19 @@ window.__ModuleLoader__.load({
       'peers.hub': '信箱',
       'peers.executeOn': '可执行请求',
       'peers.executeOff': '仅收发消息',
+      'peers.main': '主节点',
+      'skills.title': '主节点能力',
+      'skills.mainToggle': '设为主节点',
+      'skills.mainToggleHint': '主节点的技能会广播给其他节点，其他节点可一键委派。',
+      'skills.local': '本机主节点',
+      'skills.remote': '主节点：{name}',
+      'skills.none': '还没有主节点',
+      'skills.noneHint': '在主节点配置里加 mainNode: true，重载后这里会显示它的技能。',
+      'skills.empty': '主节点还没有可用技能。',
+      'skills.delegate': '委派',
+      'skills.delegated': '已填入请求，补充任务内容后发送。',
+      'skills.localHint': '这些技能在本机；其他节点会通过主节点请求使用。',
+      'skills.remoteHint': '委派会向主节点发一条执行请求，由它用本地技能执行。',
       'peers.mqttConnected': 'MQTT 已连接',
       'peers.mqttConnecting': 'MQTT 连接中',
       'peers.mqttError': 'MQTT 连接异常',
@@ -243,6 +256,19 @@ window.__ModuleLoader__.load({
       'peers.hub': 'Mailbox',
       'peers.executeOn': 'Executes requests',
       'peers.executeOff': 'Messages only',
+      'peers.main': 'main',
+      'skills.title': 'Main node skills',
+      'skills.mainToggle': 'Set as main node',
+      'skills.mainToggleHint': 'The main node advertises its skills to other nodes, which can delegate with one click.',
+      'skills.local': 'This node is the main',
+      'skills.remote': 'Main: {name}',
+      'skills.none': 'No main node yet',
+      'skills.noneHint': 'Set mainNode: true on the main node and reload; its skills will appear here.',
+      'skills.empty': 'The main node advertises no skills yet.',
+      'skills.delegate': 'Delegate',
+      'skills.delegated': 'Request drafted; add the task and send.',
+      'skills.localHint': 'These skills live here; other nodes use them by asking this node.',
+      'skills.remoteHint': 'Delegating sends a request to the main node, which runs its local skill.',
       'peers.mqttConnected': 'MQTT connected',
       'peers.mqttConnecting': 'MQTT connecting',
       'peers.mqttError': 'MQTT error',
@@ -768,6 +794,22 @@ window.__ModuleLoader__.load({
         report(t('map.selected'));
       };
 
+      const delegate = (skill, main) => {
+        if (!main || !skill) return;
+        setDraft({
+          to: main.nodeId || main.nodeName || main.label,
+          kind: 'request',
+          subject: `使用技能 ${skill.name}`,
+          body: `请使用技能 ${skill.name} 执行：\n`,
+          replyTo: '',
+        });
+        setTab('inbox');
+        report(t('skills.delegated'));
+        if (textareaRef.current && typeof textareaRef.current.focus === 'function') {
+          textareaRef.current.focus();
+        }
+      };
+
       return h('div', { className: 'ifx-page' },
         h('style', null, CSS),
         h('div', { className: 'ifx-shell' },
@@ -847,6 +889,7 @@ window.__ModuleLoader__.load({
                   onAdd: (input) => addPeer(input),
                   onRemove: (url) => removePeer(url),
                   onConfigure: (input) => configureTransport(input),
+                  onDelegate: delegate,
                 }),
             ),
           ),
@@ -1321,7 +1364,7 @@ window.__ModuleLoader__.load({
      * @param {object} props - Snapshot and actions.
      * @returns {object} React element.
      */
-    function PeersPanel({ t, snapshot, busy, onAdd, onRemove, onConfigure }) {
+    function PeersPanel({ t, snapshot, busy, onAdd, onRemove, onConfigure, onDelegate }) {
       const [url, setUrl] = React.useState('');
       const [label, setLabel] = React.useState('');
       const [token, setToken] = React.useState('');
@@ -1360,6 +1403,7 @@ window.__ModuleLoader__.load({
 
       return h('div', { className: 'ifx-stack' },
         h(MqttCard, { t, snapshot, busy, onConfigure }),
+        h(SkillsCard, { t, snapshot, onDelegate }),
         role === 'spoke' || transport === 'mqtt'
           ? null
           : h('section', { className: 'ifx-card' },
@@ -1436,6 +1480,7 @@ window.__ModuleLoader__.load({
       const [url, setUrl] = React.useState(settings.mqttUrl || 'wss://broker.emqx.io:8084/mqtt');
       const [room, setRoom] = React.useState(settings.mqttTopic || '');
       const [nodeName, setNodeName] = React.useState(settings.nodeName || '');
+      const [mainNode, setMainNode] = React.useState(settings.mainNode === true);
       const [secret, setSecret] = React.useState('');
       const [username, setUsername] = React.useState('');
       const [password, setPassword] = React.useState('');
@@ -1451,6 +1496,7 @@ window.__ModuleLoader__.load({
           await onConfigure({
             transport: 'mqtt',
             nodeName: nodeName.trim(),
+            mainNode,
             mqttUrl: url.trim(),
             mqttTopic: room.trim(),
             mqttSecret: secret,
@@ -1468,7 +1514,7 @@ window.__ModuleLoader__.load({
         if (working) return;
         setSaving(true);
         try {
-          await onConfigure({ transport: 'http', nodeName: nodeName.trim() });
+          await onConfigure({ transport: 'http', nodeName: nodeName.trim(), mainNode });
         } catch {
           // The page banner already shows the failure.
         } finally {
@@ -1500,6 +1546,15 @@ window.__ModuleLoader__.load({
           }),
           h('span', { className: 'ifx-hint' }, t('mqtt.nodeNameHint')),
         ),
+        h('label', { className: 'ifx-check' },
+          h('input', {
+            type: 'checkbox',
+            checked: mainNode,
+            onChange: (event) => setMainNode(event.target.checked),
+          }),
+          h('span', null, t('skills.mainToggle')),
+        ),
+        h('div', { className: 'ifx-hint' }, t('skills.mainToggleHint')),
         h('div', { className: 'ifx-field-row ifx-top-gap' },
           h('label', { className: 'ifx-field' },
             h('span', { className: 'ifx-label' }, t('mqtt.broker')),
@@ -1567,6 +1622,65 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Skills advertised by the main node, with a one-click delegation action.
+     * @param {object} props - Snapshot and delegation callback.
+     * @returns {object} React element.
+     */
+    function SkillsCard({ t, snapshot, onDelegate }) {
+      const settings = snapshot.settings || {};
+      const peers = snapshot.peers || [];
+      const local = settings.mainNode === true;
+      const main = local
+        ? {
+          nodeId: (snapshot.self && snapshot.self.id) || '',
+          nodeName: (snapshot.self && snapshot.self.name) || settings.nodeName || '',
+          label: (snapshot.self && snapshot.self.name) || settings.nodeName || '',
+          online: true,
+          skills: (settings.skills || []).map((skill) => skill.name),
+        }
+        : peers.find((peer) => peer.mainNode === true);
+      const skills = local
+        ? (settings.skills || [])
+        : (main && Array.isArray(main.skills) ? main.skills.map((name) => ({ name, description: '' })) : []);
+
+      return h('section', { className: 'ifx-card' },
+        h('div', { className: 'ifx-card-head' },
+          h('h2', { className: 'ifx-card-title' }, t('skills.title')),
+          h('span', { className: 'ifx-card-note' }, main
+            ? (local ? t('skills.local') : t('skills.remote', { name: main.label || main.nodeName || '' }))
+            : t('skills.none')),
+        ),
+        main
+          ? null
+          : h('div', { className: 'ifx-empty inline' },
+            h('div', { className: 'ifx-empty-title' }, t('skills.none')),
+            h('div', { className: 'ifx-hint' }, t('skills.noneHint')),
+          ),
+        main && skills.length === 0 ? h('div', { className: 'ifx-hint' }, t('skills.empty')) : null,
+        skills.length > 0
+          ? h('div', { className: 'ifx-peers ifx-top-gap' }, skills.map((skill) => h('article', {
+            key: skill.name,
+            className: 'ifx-peer-card',
+          },
+          h('div', { className: 'ifx-peer-top' },
+            h('span', { className: 'ifx-peer-name' }, skill.name),
+            local
+              ? null
+              : h('span', { className: 'ifx-peer-state' }, main.online ? t('peers.online') : t('peers.offline')),
+          ),
+          skill.description ? h('div', { className: 'ifx-peer-meta' }, skill.description) : null,
+          local
+            ? null
+            : h('div', { className: 'ifx-compose-foot' },
+              h('button', { className: 'ifx-btn ghost', onClick: () => onDelegate(skill, main) }, t('skills.delegate')),
+            ),
+          )))
+          : null,
+        h('div', { className: 'ifx-hint ifx-top-gap-sm' }, local ? t('skills.localHint') : t('skills.remoteHint')),
+      );
+    }
+
+    /**
      * One peer tile.
      * @param {object} props - Peer and actions.
      * @returns {object} React element.
@@ -1577,6 +1691,7 @@ window.__ModuleLoader__.load({
       const meta = [];
       if (peer.kind === 'hub') meta.push(t('peers.hub'));
       else if (peer.kind === 'member') meta.push(t('peers.member'));
+      if (peer.mainNode) meta.push(t('peers.main'));
       meta.push(peer.lastSeen
         ? t('peers.lastSeen', { time: relativeTime(peer.lastSeen, t) })
         : t('peers.never'));
@@ -1755,6 +1870,9 @@ window.__ModuleLoader__.load({
 .ifx-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
 .ifx-error{color:var(--dsw-alias-state-error-primary);font-size:12px;}
 .ifx-hint{margin:0;font-size:11.5px;color:var(--dsw-alias-label-secondary);}
+.ifx-check{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12px;color:var(--dsw-alias-label-secondary);}
+.ifx-check input{width:14px;height:14px;accent-color:var(--dsw-alias-brand-primary);}
+.ifx-peer-card .ifx-compose-foot{margin-top:10px;}
 @keyframes ifx-pulse{0%{transform:scale(.86);opacity:.85}70%{transform:scale(1.5);opacity:0}100%{transform:scale(1.5);opacity:0}}
 @keyframes ifx-dash{to{stroke-dashoffset:-28}}
 @keyframes ifx-rise{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}

@@ -110,6 +110,8 @@ async function loadMqttConnect() {
  * @param {string} options.secret - Shared secret used for AES-256-GCM.
  * @param {string} options.nodeId - Stable device id.
  * @param {string} options.nodeName - Display name.
+ * @param {boolean} [options.mainNode] - Whether this node is the capability/main node.
+ * @param {string[]} [options.skills] - Skill names advertised in presence.
  * @param {string} [options.username] - Broker username.
  * @param {string} [options.password] - Broker password.
  * @param {Function} [options.clientFactory] - Test seam: `(url, options) => client`.
@@ -165,6 +167,8 @@ export function createMqttTransport(options) {
       id: nodeId,
       name: nodeName,
       online,
+      mainNode: options.mainNode === true,
+      skills: Array.isArray(options.skills) ? options.skills.slice(0, 32) : [],
       ts: nowIso(),
     });
     client.publish(presenceTopic, payload, { qos: 1, retain: true }, (error) => {
@@ -189,6 +193,8 @@ export function createMqttTransport(options) {
       members.set(value.id, {
         id: value.id,
         name: typeof value.name === 'string' && value.name ? value.name : value.id.slice(0, 8),
+        mainNode: value.mainNode === true,
+        skills: Array.isArray(value.skills) ? value.skills.filter((name) => typeof name === 'string').slice(0, 32) : [],
         online: value.online !== false,
         lastSeen: typeof value.ts === 'string' ? value.ts : nowIso(),
       });
