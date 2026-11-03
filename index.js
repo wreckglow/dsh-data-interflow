@@ -1658,7 +1658,14 @@ function createEngine(ctx, rawConfig) {
       }, timeoutMs);
       if (typeof timer.unref === 'function') timer.unref();
       pendingAsks.set(sent.id, { resolve, reject, timer });
-    }).then((result) => ({ ...sent, ...result }));
+    }).then((result) => ({
+      requestId: result.requestId,
+      to: sent.to,
+      toLabel: sent.toLabel,
+      from: result.from,
+      subject: result.subject,
+      answer: result.answer,
+    }));
   }
 
   /**

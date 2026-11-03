@@ -284,6 +284,7 @@ interflow_tasks
 
 - “看看互通里现在有哪些节点、谁在线。”
 - “给 android 发一条消息：构建完成了。”
+- “问一下 android 现在在不在，等它回答。”
 - “让所有在线节点报告当前目录，把结果汇总给我。”
 - “看看互通收件箱里有没有新消息。”
 - “让主节点用 agent-experience 技能处理这个任务。”
@@ -297,6 +298,7 @@ interflow_tasks
 | 工具 | 用途 |
 | --- | --- |
 | `interflow_send` | 发消息；`to` 可以是实例名/id/URL，或 `*` 广播 |
+| `interflow_ask` | 给一个实例发任务并**在同一轮聊天里等回答**，适合问答/快速任务 |
 | `interflow_request` | 请一个实例执行任务并回传结果；必须指定单个目标 |
 | `interflow_run` | 同一任务发给多个目标；`targets: ["*"]` 表示所有已知节点 |
 | `interflow_tasks` | 查看多目标任务及每个目标的回答状态 |
